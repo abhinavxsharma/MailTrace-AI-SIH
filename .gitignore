@@ -32,3 +32,17 @@ ml/models/**/*.bin
 # IDE
 .idea/
 .vscode/
+
+# Google OAuth credentials — NEVER commit these files
+# Download credentials.json from GCP Console; set path via GOOGLE_OAUTH_CLIENT_SECRETS_FILE
+credentials.json
+token.json
+*.token
+*.token.json
+
+# Local OAuth token cache directory (dev only)
+backend/.secrets/
+.secrets/
+
+# Gmail connector dev artefacts
+gmail_token*/
