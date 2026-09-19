@@ -1,6 +1,5 @@
-"""Pydantic schemas for mailbox data models."""
-
 from datetime import datetime
+from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 from backend.app.models.enums import MailboxStatus
 
@@ -28,6 +27,8 @@ class MailboxRead(MailboxBase):
     """Response schema for mailbox details."""
 
     id: int
+    latest_history_id: Optional[str] = None
+    watch_expiration: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

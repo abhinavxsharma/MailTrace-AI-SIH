@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.analysis import router as analysis_router
 from backend.app.api.cases import router as cases_router
+from backend.app.api.google_auth import router as google_auth_router
+from backend.app.api.google_webhook import router as google_webhook_router
 from backend.app.api.mail_events import router as mail_events_router
 from backend.app.api.mailboxes import router as mailboxes_router
 from backend.app.core.logging import logger
@@ -20,6 +22,8 @@ api_router.include_router(cases_router, prefix="/cases", tags=["cases"])
 api_router.include_router(mailboxes_router, prefix="/mailboxes", tags=["mailboxes"])
 api_router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
 api_router.include_router(mail_events_router, prefix="/mail", tags=["mail"])
+api_router.include_router(google_auth_router, prefix="/auth/google", tags=["google-auth"])
+api_router.include_router(google_webhook_router, prefix="/webhooks/google", tags=["google-webhook"])
 
 
 @api_router.get("/health", tags=["system"])

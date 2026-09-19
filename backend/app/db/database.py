@@ -27,3 +27,14 @@ def init_db(engine: Optional[Engine] = None) -> None:
                 if new_col not in columns:
                     conn.execute(text(f"ALTER TABLE analyses ADD COLUMN {new_col} JSON;"))
                     conn.commit()
+
+        if "mailboxes" in inspector.get_table_names():
+            mailbox_cols = {col["name"] for col in inspector.get_columns("mailboxes")}
+            for col_name, col_type in [
+                ("latest_history_id", "VARCHAR(64)"),
+                ("watch_expiration", "TIMESTAMP"),
+                ("credentials_data", "TEXT"),
+            ]:
+                if col_name not in mailbox_cols:
+                    conn.execute(text(f"ALTER TABLE mailboxes ADD COLUMN {col_name} {col_type};"))
+                    conn.commit()

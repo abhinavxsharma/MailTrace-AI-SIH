@@ -84,3 +84,29 @@ def update_mailbox_status(
         mailbox=mailbox,
         status_update=status_update,
     )
+
+
+@router.post(
+    "/{mailbox_id}/watch",
+    status_code=status.HTTP_200_OK,
+    summary="Start or renew mailbox push watch",
+)
+def start_watch(
+    mailbox_id: int,
+    db: Session = Depends(get_db),
+):
+    """Start or renew push notification watch for a mailbox."""
+    mailbox = mailbox_service.get_mailbox(db=db, mailbox_id=mailbox_id)
+    if not mailbox:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mailbox not found.",
+        )
+    if mailbox.provider.lower() == "gmail":
+        from backend.app.services.gmail.watcher import start_mailbox_watch
+        return start_mailbox_watch(db=db, mailbox=mailbox)
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Watch is not supported for provider '{mailbox.provider}'.",
+    )
+

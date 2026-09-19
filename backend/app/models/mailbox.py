@@ -1,8 +1,8 @@
 """SQLAlchemy model for connected mailboxes."""
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, List
-from sqlalchemy import DateTime, Integer, String
+from typing import TYPE_CHECKING, List, Optional
+from sqlalchemy import DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.db.database import Base
@@ -25,6 +25,9 @@ class Mailbox(Base):
         nullable=False,
         default=MailboxStatus.CONNECTED.value,
     )
+    latest_history_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    watch_expiration: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    credentials_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
