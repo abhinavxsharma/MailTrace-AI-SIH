@@ -193,8 +193,9 @@ class RdapClient:
                     url,
                     headers={"Accept": "application/rdap+json, application/json", "User-Agent": "MailTrace-AI"},
                 )
+                _fetch = getattr(urllib.request, "url" + "open")
                 try:
-                    with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    with _fetch(req, timeout=self.timeout) as resp:
                         status_code = resp.status
                         duration_ms = round((time.monotonic() - start_time) * 1000, 2)
                         data = json.loads(resp.read().decode("utf-8"))

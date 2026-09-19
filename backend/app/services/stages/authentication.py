@@ -36,7 +36,7 @@ class AuthenticationService(BaseAnalysisStage):
                     "spf_aligned": auth_res.alignment.spf_aligned if hasattr(auth_res, "alignment") else False,
                     "dkim_aligned": auth_res.alignment.dkim_aligned if hasattr(auth_res, "alignment") else False,
                 },
-                "discrepancies": [d.message for d in getattr(auth_res, "discrepancies", [])],
+                "discrepancies": [getattr(d, "description", str(d)) for d in getattr(auth_res, "discrepancies", [])],
             }
         except Exception as exc:
             logger.warning("Authentication analysis stage error: %s", str(exc))

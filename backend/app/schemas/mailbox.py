@@ -29,6 +29,7 @@ class MailboxRead(MailboxBase):
     id: int
     latest_history_id: Optional[str] = None
     watch_expiration: Optional[datetime] = None
+    has_credentials: bool = False
     created_at: datetime
     updated_at: datetime
 

@@ -60,6 +60,59 @@ def fetch_gmail_message_resource(service: Resource, message_id: str) -> Dict[str
         ) from exc
 
 
+def list_gmail_messages(
+    service: Resource,
+    max_results: int = 30,
+    query: Optional[str] = None,
+) -> list[Dict[str, Any]]:
+    """List recent messages from Gmail inbox with snippet and basic headers.
+
+    Zero local file download. Operates entirely in memory via Gmail API.
+    """
+    try:
+        kwargs: Dict[str, Any] = {"userId": "me", "maxResults": max_results}
+        if query:
+            kwargs["q"] = query
+        result = service.users().messages().list(**kwargs).execute()
+        messages_meta = result.get("messages", [])
+        detailed_list: list[Dict[str, Any]] = []
+        for meta in messages_meta:
+            m_id = meta["id"]
+            try:
+                msg_data = service.users().messages().get(
+                    userId="me",
+                    id=m_id,
+                    format="metadata",
+                    metadataHeaders=["From", "Subject", "Date", "To"],
+                ).execute()
+                headers = {
+                    h.get("name", ""): h.get("value", "")
+                    for h in msg_data.get("payload", {}).get("headers", [])
+                }
+                raw_subj = headers.get("Subject", "")
+                subj_clean = raw_subj.strip() if (raw_subj and raw_subj.strip()) else "(No Subject)"
+                detailed_list.append({
+                    "id": m_id,
+                    "thread_id": msg_data.get("threadId"),
+                    "snippet": msg_data.get("snippet", ""),
+                    "from": headers.get("From", ""),
+                    "to": headers.get("To", ""),
+                    "subject": subj_clean,
+                    "date": headers.get("Date", ""),
+                })
+            except Exception as e:
+                logger.warning("Failed to fetch message metadata for %s: %s", m_id, e)
+                detailed_list.append({"id": m_id, "snippet": "", "subject": "(No Subject)"})
+        return detailed_list
+    except HttpError as exc:
+        logger.error("Failed to list Gmail messages: %s", str(exc))
+        raise MailTraceException(
+            message=f"Gmail API list error: {exc.reason}",
+            code="GMAIL_API_ERROR",
+            status_code=exc.status_code if hasattr(exc, "status_code") else 502,
+        ) from exc
+
+
 class GmailProviderClient(MailProviderClient):
     """Concrete MailProviderClient connector for Google Gmail."""
 

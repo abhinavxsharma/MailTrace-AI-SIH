@@ -56,6 +56,26 @@ def list_cases(
 
 
 @router.get(
+    "/demo-templates",
+    summary="Get controlled demo case templates for SIH evaluation",
+)
+def get_demo_templates() -> List[dict]:
+    """Retrieve templates for the 3 controlled SIH evaluation cases."""
+    from backend.app.services.demo_cases import get_all_demo_templates
+    return get_all_demo_templates()
+
+
+@router.post(
+    "/seed-demo",
+    summary="Seed and analyze the 3 controlled SIH demonstration cases",
+)
+def seed_demo(db: Session = Depends(get_db)) -> List[dict]:
+    """Run all 3 controlled demo cases through the real pipeline in the database."""
+    from backend.app.services.demo_cases import seed_demo_cases
+    return seed_demo_cases(db=db)
+
+
+@router.get(
     "/{case_id}",
     response_model=CaseRead,
     summary="Get case by identifier",

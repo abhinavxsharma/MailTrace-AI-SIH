@@ -5,6 +5,7 @@ from backend.app.services.gmail.client import (
     build_gmail_service,
     fetch_gmail_message_resource,
     get_user_profile,
+    list_gmail_messages,
 )
 from backend.app.services.gmail.history import list_new_messages_from_history
 from backend.app.services.gmail.message_parser import parse_gmail_message
@@ -33,6 +34,7 @@ __all__ = [
     "fetch_gmail_message_resource",
     "generate_oauth_state",
     "get_user_profile",
+    "list_gmail_messages",
     "list_new_messages_from_history",
     "parse_gmail_message",
     "start_mailbox_watch",

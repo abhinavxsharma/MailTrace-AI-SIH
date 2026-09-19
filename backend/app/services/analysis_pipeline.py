@@ -123,8 +123,10 @@ class AnalysisPipeline:
             stage_results: Dict[str, Any] = {}
             context: Dict[str, Any] = {
                 "case_id": case.case_id,
+                "case_db_id": case.id,
                 "provider": email.provider,
                 "received_at": str(case.received_at),
+                "db": db,
             }
 
             for stage_name, stage_instance in stages:
@@ -152,13 +154,35 @@ class AnalysisPipeline:
                         )
                     )
 
-            # Update case risk score if computed by the risk stage
+            # 4. Propagate ML stage findings into Case record
+            ml_res = stage_results.get("ml", {})
+            if isinstance(ml_res, dict) and ml_res.get("status") == "completed":
+                raw_label = ml_res.get("label") or ml_res.get("prediction")
+                if raw_label:
+                    raw_upper = str(raw_label).upper().strip()
+                    if raw_upper in Classification.__members__:
+                        case.classification = Classification[raw_upper].value
+                    elif "MAL" in raw_upper:
+                        case.classification = Classification.MALICIOUS.value
+                    elif "BEN" in raw_upper:
+                        case.classification = Classification.BENIGN.value
+                    elif "SUSP" in raw_upper:
+                        case.classification = Classification.SUSPICIOUS.value
+
+                raw_conf = ml_res.get("confidence")
+                if isinstance(raw_conf, (int, float)) and not isinstance(raw_conf, bool):
+                    case.ai_confidence = float(raw_conf)
+
+            # 5. Propagate Risk score into Case record
             if "risk" in stage_results and isinstance(stage_results["risk"], dict):
                 calculated_score = stage_results["risk"].get("total_score")
                 if calculated_score is not None and isinstance(calculated_score, int):
-                    case.risk_score = calculated_score
+                    case.risk_score = max(0, min(calculated_score, 100))
 
-            # 4. Persist Analysis record with structured stage results
+            # 6. Mark case status as ANALYZED upon pipeline completion
+            case.status = CaseStatus.ANALYZED.value
+
+            # 7. Persist Analysis record with structured stage results
             analysis = Analysis(
                 case_id=case.id,
                 classification=case.classification,
@@ -173,14 +197,15 @@ class AnalysisPipeline:
             )
             db.add(analysis)
 
-            # 5. Record pipeline completion audit event
+            # 8. Record pipeline completion audit event
             db.add(
                 AuditEvent(
                     case_id=case.id,
-                    event_type="PIPELINE_EXECUTED",
+                    event_type="CASE_ANALYZED",
                     message=(
                         f"Analysis pipeline completed {len(stages)} stages for case {case.case_id}. "
-                        "Case remains in PROCESSING pending module integrations."
+                        f"Status: {case.status}, Classification: {case.classification}, "
+                        f"AI Confidence: {case.ai_confidence}, Risk Score: {case.risk_score}."
                     ),
                 )
             )

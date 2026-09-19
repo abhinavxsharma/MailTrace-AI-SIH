@@ -249,7 +249,7 @@ def parse_email(
 
     PRIVACY: Operates strictly in memory. Never creates or writes to files.
     """
-    if isinstance(email_input, NormalizedEmail):
+    if isinstance(email_input, NormalizedEmail) or type(email_input).__name__ == "NormalizedEmail":
         return _parse_from_normalized(email_input)
     elif isinstance(email_input, (str, bytes, email.message.Message)):
         return _parse_from_mime(email_input)
@@ -340,7 +340,7 @@ def _parse_from_normalized(norm: NormalizedEmail) -> ParsedEmail:
         headers=header_list,
         received_hops=received_hops,
         attachments=[],
-        urls=urls,
+        extracted_urls=urls,
         raw_size_bytes=getattr(norm, "raw_size_bytes", None),
     )
 

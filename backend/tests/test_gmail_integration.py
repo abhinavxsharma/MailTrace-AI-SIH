@@ -485,7 +485,7 @@ class GmailIntegrationTestCase(unittest.TestCase):
             self.assertEqual(case.provider, "gmail")
             self.assertEqual(case.sender, "phisher@malicious.org")
             self.assertEqual(case.subject, "Urgent Invoice Payment")
-            self.assertIn(case.status, [CaseStatus.PROCESSING.value, CaseStatus.COMPLETED.value])
+            self.assertIn(case.status, [CaseStatus.PROCESSING.value, CaseStatus.ANALYZED.value, CaseStatus.COMPLETED.value])
             self.assertIsNotNone(case.risk_score)
 
         # Execute second sync with same message ID -> Enforces idempotency & skips duplicate
@@ -601,6 +601,76 @@ class GmailIntegrationTestCase(unittest.TestCase):
             self.assertEqual(body["error"]["code"], "INVALID_PUBSUB_TOPIC")
         finally:
             settings.google_pubsub_topic = orig_topic
+
+    # 20. Raw LAN IP redirect URI is rejected unless explicitly configured as GOOGLE_REDIRECT_URI
+    def test_raw_lan_ip_redirect_uri_rejected(self) -> None:
+        status_code, body, _ = self.request(
+            "GET",
+            "/api/auth/google/login?redirect_uri=http://172.22.214.63:8000/api/auth/google/callback",
+        )
+        self.assertEqual(status_code, 400)
+        self.assertIn("error", body)
+        self.assertEqual(body["error"]["code"], "INVALID_OAUTH_STATE")
+
+    # 21. Configured HTTPS tunnel redirect URI is accepted
+    @patch("backend.app.services.gmail.oauth.Flow.from_client_config")
+    def test_https_tunnel_redirect_uri_accepted(self, mock_flow_cls: MagicMock) -> None:
+        mock_flow = MagicMock()
+        tunnel_auth_url = "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fmailtrace.loca.lt%2Fapi%2Fauth%2Fgoogle%2Fcallback"
+        mock_flow.authorization_url.return_value = (tunnel_auth_url, "state_tunnel")
+        mock_flow_cls.return_value = mock_flow
+
+        orig_redirect = settings.google_redirect_uri
+        try:
+            settings.google_redirect_uri = "https://mailtrace.loca.lt/api/auth/google/callback"
+            status_code, body, _ = self.request("GET", "/api/auth/google/login")
+            self.assertEqual(status_code, 200)
+            self.assertIn("authorization_url", body)
+            self.assertEqual(body["authorization_url"], tunnel_auth_url)
+        finally:
+            settings.google_redirect_uri = orig_redirect
+
+    # 22. OAuth callback redirects to mailtrace:// custom URL scheme for browser / mobile
+    @patch("backend.app.api.google_auth.exchange_code_for_credentials")
+    @patch("backend.app.api.google_auth.build_gmail_service")
+    def test_oauth_callback_browser_redirect(self, mock_build_svc: MagicMock, mock_exchange: MagicMock) -> None:
+        mock_creds = MagicMock()
+        mock_creds.token = "tok_abc"
+        mock_creds.refresh_token = "ref_xyz"
+        mock_creds.token_uri = "https://oauth2.googleapis.com/token"
+        mock_creds.client_id = "test_cid"
+        mock_creds.client_secret = "test_sec"
+        mock_creds.scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
+        mock_creds.expiry = None
+        mock_exchange.return_value = mock_creds
+
+        mock_svc = MagicMock()
+        mock_svc.users().getProfile(userId="me").execute.return_value = {
+            "emailAddress": "browser.user@gmail.com",
+            "historyId": "12345",
+        }
+        mock_build_svc.return_value = mock_svc
+
+        state = generate_oauth_state()
+        # Test browser text/html request
+        status_code, body, headers = self.request(
+            "GET",
+            f"/api/auth/google/callback?code=mock_code&state={state}",
+            headers_dict={"accept": "text/html,application/xhtml+xml"},
+        )
+        self.assertEqual(status_code, 200)
+        self.assertIn("location", headers)
+        self.assertTrue(headers["location"].startswith("mailtrace://oauth?status=connected&mailbox_id="))
+
+        # Test explicit format=redirect
+        state2 = generate_oauth_state()
+        status_code2, _, headers2 = self.request(
+            "GET",
+            f"/api/auth/google/callback?code=mock_code&state={state2}&format=redirect",
+        )
+        self.assertEqual(status_code2, 307)
+        self.assertIn("location", headers2)
+        self.assertTrue(headers2["location"].startswith("mailtrace://oauth?status=connected&mailbox_id="))
 
 
 if __name__ == "__main__":

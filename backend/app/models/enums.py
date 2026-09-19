@@ -8,6 +8,7 @@ class CaseStatus(str, Enum):
 
     NEW = "NEW"
     PROCESSING = "PROCESSING"
+    ANALYZED = "ANALYZED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
@@ -17,6 +18,7 @@ class Classification(str, Enum):
 
     PENDING = "PENDING"
     BENIGN = "BENIGN"
+    SUSPICIOUS = "SUSPICIOUS"
     MALICIOUS = "MALICIOUS"
 
 

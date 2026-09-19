@@ -46,3 +46,8 @@ class Mailbox(Base):
         back_populates="mailbox",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def has_credentials(self) -> bool:
+        """Indicate whether the mailbox has active OAuth credentials stored."""
+        return bool(self.credentials_data)

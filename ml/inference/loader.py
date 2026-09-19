@@ -21,6 +21,15 @@ from ml.inference.models import ModelNotFoundError
 DEFAULT_MODEL_DIR_NAME = "dataset3_v1.0.0"
 
 
+def find_repo_root() -> Path:
+    """Locate repository root portably by searching parents for known markers."""
+    current = Path(__file__).resolve().parent
+    for parent in [current, *current.parents]:
+        if (parent / "ml" / "models").is_dir() or (parent / "backend").is_dir():
+            return parent
+    return Path(__file__).resolve().parents[2]
+
+
 class ModelLoader:
     """
     Lazy model loader for dataset3_v1.0.0 DistilBERT sequence classification.
@@ -41,24 +50,43 @@ class ModelLoader:
         self._tokenizer: Any = None
 
     def get_resolved_path(self) -> Path:
-        """Resolve the model directory path from explicit param, settings, or env."""
-        if self._configured_path:
-            return Path(self._configured_path).resolve()
+        """Resolve the model directory path from explicit param, env, settings, or repo root."""
+        repo_root = find_repo_root()
 
-        env_path = os.getenv("ML_MODEL_PATH")
-        if env_path:
-            return Path(env_path).resolve()
+        raw_target: str | Path | None = None
+        if self._configured_path is not None:
+            raw_target = self._configured_path
+        elif os.getenv("ML_MODEL_PATH"):
+            raw_target = os.getenv("ML_MODEL_PATH")
+        elif settings and hasattr(settings, "ML_MODEL_PATH") and settings.ML_MODEL_PATH:
+            raw_target = settings.ML_MODEL_PATH
+        elif settings and hasattr(settings, "model_path") and settings.model_path:
+            raw_target = settings.model_path
 
-        # Fall back to application settings
-        try:
-            if settings and hasattr(settings, "model_path"):
-                return Path(settings.model_path).resolve()
-        except Exception:  # noqa: BLE001
-            pass
+        if raw_target is None:
+            raw_target = repo_root / "ml" / "models" / DEFAULT_MODEL_DIR_NAME
 
-        # Fallback relative to repo root if settings cannot be loaded
-        repo_root = Path(__file__).resolve().parents[2]
-        return (repo_root / "ml" / "models" / DEFAULT_MODEL_DIR_NAME).resolve()
+        candidate = Path(raw_target)
+
+        # 1. Absolute path
+        if candidate.is_absolute():
+            target = candidate.resolve()
+        else:
+            # 2. Relative path: check repo root first, then CWD
+            if (repo_root / candidate).exists():
+                target = (repo_root / candidate).resolve()
+            elif (Path.cwd() / candidate).exists():
+                target = (Path.cwd() / candidate).resolve()
+            else:
+                target = (repo_root / candidate).resolve()
+
+        # 3. If target points to a parent directory containing DEFAULT_MODEL_DIR_NAME
+        if target.is_dir() and not (target / "config.json").is_file():
+            sub = target / DEFAULT_MODEL_DIR_NAME
+            if (sub / "config.json").is_file():
+                return sub.resolve()
+
+        return target
 
     def get_device(self) -> str:
         """Determine target execution device ('cuda' if available and requested, else 'cpu')."""

@@ -27,8 +27,13 @@ def get_mailbox(db: Session, mailbox_id: int) -> Optional[Mailbox]:
 
 
 def list_mailboxes(db: Session, skip: int = 0, limit: int = 100) -> List[Mailbox]:
-    """Retrieve all configured mailboxes with pagination."""
-    stmt = select(Mailbox).order_by(Mailbox.created_at.desc()).offset(skip).limit(limit)
+    """Retrieve all configured mailboxes with pagination, prioritizing active credentials."""
+    stmt = (
+        select(Mailbox)
+        .order_by(Mailbox.credentials_data.isnot(None).desc(), Mailbox.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
     return list(db.execute(stmt).scalars().all())
 
 

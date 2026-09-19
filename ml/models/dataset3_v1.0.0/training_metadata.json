@@ -1,0 +1,15 @@
+{
+  "project": "MAILTRACE AI",
+  "stage": "Dataset 3 continual fine-tuning",
+  "version": "dataset3_v1.0.0",
+  "base_checkpoint": "/kaggle/input/datasets/abhinavsharma09/mailtrace-ai-dataset2-model/dataset2_v1.0.0",
+  "seed": 42,
+  "epochs": 2,
+  "learning_rate": 1e-05,
+  "per_gpu_batch": 32,
+  "world_size": 2,
+  "effective_batch": 64,
+  "warmup_steps": 149,
+  "max_length": 384,
+  "model_input": "email text and subject only"
+}

@@ -1,0 +1,7 @@
+# MAILTRACE AI — Backend Development Dependencies
+# Install: pip install -r requirements.txt -r requirements-dev.txt
+
+# Testing
+pytest>=8.2.0
+pytest-cov>=5.0.0
+pytest-mock>=3.14.0

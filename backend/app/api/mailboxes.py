@@ -1,10 +1,11 @@
 """API router for mailbox database management."""
 
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from backend.app.db.session import get_db
+from backend.app.models.enums import MailboxStatus
 from backend.app.schemas.mailbox import (
     MailboxCreate,
     MailboxRead,
@@ -87,6 +88,29 @@ def update_mailbox_status(
 
 
 @router.post(
+    "/{mailbox_id}/disconnect",
+    response_model=MailboxRead,
+    summary="Disconnect mailbox and purge OAuth credentials",
+)
+def disconnect_mailbox(
+    mailbox_id: int,
+    db: Session = Depends(get_db),
+) -> MailboxRead:
+    """Revoke local OAuth token and mark mailbox as disconnected."""
+    mailbox = mailbox_service.get_mailbox(db=db, mailbox_id=mailbox_id)
+    if not mailbox:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mailbox not found.",
+        )
+    mailbox.credentials_data = None
+    mailbox.status = MailboxStatus.DISCONNECTED.value
+    db.commit()
+    db.refresh(mailbox)
+    return mailbox
+
+
+@router.post(
     "/{mailbox_id}/watch",
     status_code=status.HTTP_200_OK,
     summary="Start or renew mailbox push watch",
@@ -109,4 +133,114 @@ def start_watch(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"Watch is not supported for provider '{mailbox.provider}'.",
     )
+
+
+@router.get(
+    "/{mailbox_id}/messages",
+    status_code=status.HTTP_200_OK,
+    summary="List recent messages from connected mailbox",
+)
+def list_mailbox_messages(
+    mailbox_id: int,
+    max_results: int = Query(30, ge=1, le=100, description="Max messages to fetch"),
+    q: Optional[str] = Query(None, description="Optional search query"),
+    response: Response = None,
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """Fetch recent messages directly from provider API in memory (zero disk/eml)."""
+    if response is not None:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    mailbox = mailbox_service.get_mailbox(db=db, mailbox_id=mailbox_id)
+    if not mailbox:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mailbox not found.",
+        )
+    if mailbox.provider.lower() == "gmail":
+        from backend.app.services.gmail.client import build_gmail_service, list_gmail_messages
+        from backend.app.services.gmail.token_store import TokenStore
+
+        creds = TokenStore.get_credentials(db=db, mailbox=mailbox)
+        if not creds:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Mailbox has no active Google OAuth credentials. Please authenticate via OAuth.",
+            )
+        service = build_gmail_service(credentials=creds)
+        return list_gmail_messages(service=service, max_results=max_results, query=q)
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Message listing not supported for provider '{mailbox.provider}'.",
+    )
+
+
+@router.post(
+    "/{mailbox_id}/messages/{message_id}/analyze",
+    status_code=status.HTTP_200_OK,
+    summary="Fetch and analyze a specific message directly from mailbox in memory",
+)
+def analyze_mailbox_message(
+    mailbox_id: int,
+    message_id: str,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Retrieve message from provider in memory, parse it, run analysis pipeline, and return result.
+
+    Zero .eml or disk download required.
+    """
+    mailbox = mailbox_service.get_mailbox(db=db, mailbox_id=mailbox_id)
+    if not mailbox:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Mailbox not found.",
+        )
+    if mailbox.provider.lower() == "gmail":
+        from backend.app.services.gmail.client import GmailProviderClient
+        from backend.app.services.analysis_pipeline import default_pipeline
+
+        provider_client = GmailProviderClient(db_session=db)
+        normalized_email = provider_client.fetch_message(
+            provider_message_id=message_id,
+            account_email=mailbox.account_email,
+        )
+        case, stage_results = default_pipeline.run(
+            db=db,
+            email=normalized_email,
+        )
+        if not case.mailbox_id:
+            case.mailbox_id = mailbox.id
+            db.commit()
+            db.refresh(case)
+
+        return {
+            "case": {
+                "id": case.id,
+                "case_id": case.case_id,
+                "status": case.status,
+                "classification": case.classification,
+                "ai_confidence": case.ai_confidence,
+                "risk_score": case.risk_score,
+                "created_at": case.created_at.isoformat() if case.created_at else None,
+            },
+            "analysis": {
+                "classification": case.classification,
+                "ai_confidence": case.ai_confidence,
+                "risk_score": case.risk_score,
+                "forensics": stage_results.get("forensics", {}),
+                "authentication": stage_results.get("authentication", {}),
+                "ml": stage_results.get("ml", {}),
+                "intelligence": stage_results.get("intelligence", {}),
+                "correlation": stage_results.get("correlation", {}),
+                "risk": stage_results.get("risk", {}),
+            },
+        }
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Message analysis not supported for provider '{mailbox.provider}'.",
+    )
+
 
