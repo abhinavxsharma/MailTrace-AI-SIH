@@ -22,9 +22,12 @@ build/
 *.sqlite
 *.db
 
-# ML model files
+# ML model files (never commit model weights)
 ml/models/*/model.safetensors
+ml/models/**/*.safetensors
 ml/models/**/*.bin
+ml/models/**/*.pt
+ml/models/**/*.onnx
 
 # OS
 .DS_Store

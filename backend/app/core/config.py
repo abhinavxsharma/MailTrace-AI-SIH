@@ -87,6 +87,18 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------ #
+    # Machine Learning / Inference (Chunk 4)                              #
+    # ------------------------------------------------------------------ #
+
+    ML_MODEL_PATH: str = Field(
+        default="ml/models/dataset3_v1.0.0",
+        description=(
+            "Filesystem path to the local directory containing the trained "
+            "DistilBERT model (dataset3_v1.0.0) weights and tokenizer."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
     # Validators                                                           #
     # ------------------------------------------------------------------ #
 

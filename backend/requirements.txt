@@ -14,3 +14,11 @@ google-api-python-client>=2.130.0
 google-auth>=2.29.0
 google-auth-oauthlib>=1.2.0
 google-auth-httplib2>=0.2.0
+
+# DNS and email authentication (Chunk 3)
+dnspython>=2.6.0
+dkimpy>=1.1.0
+
+# Machine Learning / DistilBERT inference (Chunk 4)
+torch>=2.0.0
+transformers>=4.40.0
