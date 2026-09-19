@@ -61,6 +61,19 @@ def get_case(db: Session, case_identifier: Union[str, int]) -> Optional[Case]:
     return db.execute(stmt).scalar_one_or_none()
 
 
+def get_case_by_provider_message(
+    db: Session,
+    provider: str,
+    provider_message_id: str,
+) -> Optional[Case]:
+    """Look up an existing case by provider name and provider message ID."""
+    stmt = select(Case).where(
+        Case.provider == provider,
+        Case.provider_message_id == provider_message_id,
+    )
+    return db.execute(stmt).scalar_one_or_none()
+
+
 def list_cases(
     db: Session,
     skip: int = 0,

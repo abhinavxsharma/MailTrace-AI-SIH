@@ -1,8 +1,8 @@
 """SQLAlchemy model for case threat analysis results."""
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, String
+from typing import TYPE_CHECKING, Optional, Any
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.db.database import Base
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class Analysis(Base):
-    """Stores threat analysis determinations, confidence, and risk scoring."""
+    """Stores threat analysis determinations, confidence, risk scoring, and stage outputs."""
 
     __tablename__ = "analyses"
 
@@ -31,6 +31,14 @@ class Analysis(Base):
     )
     ai_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     risk_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Structured stage execution results
+    forensics: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
+    authentication: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
+    ml: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
+    intelligence: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
+    correlation: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
+    risk: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

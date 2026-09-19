@@ -1,6 +1,11 @@
 """Pydantic schemas package."""
 
-from backend.app.schemas.analysis import AnalysisRead
+from backend.app.schemas.analysis import (
+    AnalysisRead,
+    AnalysisResult,
+    AnalysisStartResponse,
+    NormalizedEmail,
+)
 from backend.app.schemas.audit import AuditEventRead
 from backend.app.schemas.case import (
     CaseAnalysisUpdate,
@@ -27,5 +32,8 @@ __all__ = [
     "CaseAnalysisUpdate",
     "CaseRead",
     "AnalysisRead",
+    "AnalysisResult",
+    "AnalysisStartResponse",
+    "NormalizedEmail",
     "AuditEventRead",
 ]
