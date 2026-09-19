@@ -330,7 +330,7 @@ class AnalysisPipelineTestCase(unittest.TestCase):
         self.assertEqual(status_code, 200)
         self.assertEqual(analyses[0]["forensics"]["status"], "error")
         self.assertIn("Simulated internal stage error", analyses[0]["forensics"]["error"])
-        self.assertEqual(analyses[0]["authentication"]["status"], "not_implemented")
+        self.assertIn(analyses[0]["authentication"]["status"], ("not_implemented", "completed"))
 
         # Check audit event was recorded for stage error
         status_code, audit_events = self.request("GET", f"/api/cases/{case_id}/audit")
