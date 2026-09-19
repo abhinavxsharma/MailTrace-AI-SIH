@@ -60,135 +60,144 @@ class AnalysisPipeline:
             email.provider,
         )
 
-        # 1. Find existing case or create a new one
-        case = get_case_by_provider_message(
-            db=db,
-            provider=email.provider,
-            provider_message_id=email.provider_message_id,
-        )
-
-        if not case:
-            case = Case(
-                case_id=generate_case_id(),
-                mailbox_id=email.mailbox_id,
+        try:
+            # 1. Find existing case or create a new one
+            case = get_case_by_provider_message(
+                db=db,
                 provider=email.provider,
                 provider_message_id=email.provider_message_id,
-                thread_id=email.thread_id,
-                sender=email.sender,
-                recipient=email.recipient,
-                subject=email.subject,
-                received_at=email.received_at or datetime.now(timezone.utc),
-                status=CaseStatus.NEW.value,
-                classification=Classification.PENDING.value,
             )
-            db.add(case)
-            db.flush()
 
-            db.add(
-                AuditEvent(
-                    case_id=case.id,
-                    event_type="CASE_CREATED",
-                    message=(
-                        f"Case {case.case_id} created for message '{case.provider_message_id}' "
-                        f"via {case.provider}."
-                    ),
+            if not case:
+                case = Case(
+                    case_id=generate_case_id(),
+                    mailbox_id=email.mailbox_id,
+                    provider=email.provider,
+                    provider_message_id=email.provider_message_id,
+                    thread_id=email.thread_id,
+                    sender=email.sender,
+                    recipient=email.recipient,
+                    subject=email.subject,
+                    received_at=email.received_at or datetime.now(timezone.utc),
+                    status=CaseStatus.NEW.value,
+                    classification=Classification.PENDING.value,
                 )
-            )
-            logger.info("Created new case %s for message %s", case.case_id, case.provider_message_id)
-        else:
-            logger.info("Reusing existing case %s for message %s", case.case_id, case.provider_message_id)
+                db.add(case)
+                db.flush()
 
-        # 2. Transition case to PROCESSING
-        case.status = CaseStatus.PROCESSING.value
-        db.add(
-            AuditEvent(
-                case_id=case.id,
-                event_type="STATUS_UPDATED",
-                message=f"Case status transitioned to {CaseStatus.PROCESSING.value} for analysis execution.",
-            )
-        )
-        db.flush()
-
-        # 3. Execute analysis stages sequentially
-        stages = [
-            ("forensics", self.forensics),
-            ("authentication", self.authentication),
-            ("ml", self.ml),
-            ("intelligence", self.intelligence),
-            ("correlation", self.correlation),
-            ("risk", self.risk),
-        ]
-
-        stage_results: Dict[str, Any] = {}
-        context: Dict[str, Any] = {
-            "case_id": case.case_id,
-            "provider": email.provider,
-            "received_at": str(case.received_at),
-        }
-
-        for stage_name, stage_instance in stages:
-            try:
-                result = stage_instance.analyze(email=email, context=context)
-                stage_results[stage_name] = result
-                context[stage_name] = result
-            except Exception as e:
-                logger.error(
-                    "Analysis stage '%s' failed for case %s: %s",
-                    stage_name,
-                    case.case_id,
-                    str(e),
-                    exc_info=True,
-                )
-                stage_results[stage_name] = {
-                    "status": "error",
-                    "error": str(e),
-                }
                 db.add(
                     AuditEvent(
                         case_id=case.id,
-                        event_type=f"STAGE_ERROR_{stage_name.upper()}",
-                        message=f"Stage '{stage_name}' encountered an error: {str(e)}",
+                        event_type="CASE_CREATED",
+                        message=(
+                            f"Case {case.case_id} created for message '{case.provider_message_id}' "
+                            f"via {case.provider}."
+                        ),
                     )
                 )
+                logger.info("Created new case %s for message %s", case.case_id, case.provider_message_id)
+            else:
+                logger.info("Reusing existing case %s for message %s", case.case_id, case.provider_message_id)
 
-        # Update case risk score if computed by the risk stage
-        if "risk" in stage_results and isinstance(stage_results["risk"], dict):
-            calculated_score = stage_results["risk"].get("total_score")
-            if calculated_score is not None and isinstance(calculated_score, int):
-                case.risk_score = calculated_score
-
-        # 4. Persist Analysis record with structured stage results
-        analysis = Analysis(
-            case_id=case.id,
-            classification=case.classification,
-            ai_confidence=case.ai_confidence,
-            risk_score=case.risk_score,
-            forensics=stage_results.get("forensics", {}),
-            authentication=stage_results.get("authentication", {}),
-            ml=stage_results.get("ml", {}),
-            intelligence=stage_results.get("intelligence", {}),
-            correlation=stage_results.get("correlation", {}),
-            risk=stage_results.get("risk", {}),
-        )
-        db.add(analysis)
-
-        # 5. Record pipeline completion audit event
-        db.add(
-            AuditEvent(
-                case_id=case.id,
-                event_type="PIPELINE_EXECUTED",
-                message=(
-                    f"Analysis pipeline completed {len(stages)} stages for case {case.case_id}. "
-                    "Case remains in PROCESSING pending module integrations."
-                ),
+            # 2. Transition case to PROCESSING
+            case.status = CaseStatus.PROCESSING.value
+            db.add(
+                AuditEvent(
+                    case_id=case.id,
+                    event_type="STATUS_UPDATED",
+                    message=f"Case status transitioned to {CaseStatus.PROCESSING.value} for analysis execution.",
+                )
             )
-        )
+            db.flush()
 
-        db.commit()
-        db.refresh(case)
+            # 3. Execute analysis stages sequentially
+            stages = [
+                ("forensics", self.forensics),
+                ("authentication", self.authentication),
+                ("ml", self.ml),
+                ("intelligence", self.intelligence),
+                ("correlation", self.correlation),
+                ("risk", self.risk),
+            ]
 
-        logger.info("Pipeline execution completed for case %s", case.case_id)
-        return case, stage_results
+            stage_results: Dict[str, Any] = {}
+            context: Dict[str, Any] = {
+                "case_id": case.case_id,
+                "provider": email.provider,
+                "received_at": str(case.received_at),
+            }
+
+            for stage_name, stage_instance in stages:
+                try:
+                    result = stage_instance.analyze(email=email, context=context)
+                    stage_results[stage_name] = result
+                    context[stage_name] = result
+                except Exception as e:
+                    logger.error(
+                        "Analysis stage '%s' failed for case %s: %s",
+                        stage_name,
+                        case.case_id,
+                        str(e),
+                        exc_info=True,
+                    )
+                    stage_results[stage_name] = {
+                        "status": "error",
+                        "error": str(e),
+                    }
+                    db.add(
+                        AuditEvent(
+                            case_id=case.id,
+                            event_type=f"STAGE_ERROR_{stage_name.upper()}",
+                            message=f"Stage '{stage_name}' encountered an error: {str(e)}",
+                        )
+                    )
+
+            # Update case risk score if computed by the risk stage
+            if "risk" in stage_results and isinstance(stage_results["risk"], dict):
+                calculated_score = stage_results["risk"].get("total_score")
+                if calculated_score is not None and isinstance(calculated_score, int):
+                    case.risk_score = calculated_score
+
+            # 4. Persist Analysis record with structured stage results
+            analysis = Analysis(
+                case_id=case.id,
+                classification=case.classification,
+                ai_confidence=case.ai_confidence,
+                risk_score=case.risk_score,
+                forensics=stage_results.get("forensics", {}),
+                authentication=stage_results.get("authentication", {}),
+                ml=stage_results.get("ml", {}),
+                intelligence=stage_results.get("intelligence", {}),
+                correlation=stage_results.get("correlation", {}),
+                risk=stage_results.get("risk", {}),
+            )
+            db.add(analysis)
+
+            # 5. Record pipeline completion audit event
+            db.add(
+                AuditEvent(
+                    case_id=case.id,
+                    event_type="PIPELINE_EXECUTED",
+                    message=(
+                        f"Analysis pipeline completed {len(stages)} stages for case {case.case_id}. "
+                        "Case remains in PROCESSING pending module integrations."
+                    ),
+                )
+            )
+
+            db.commit()
+            db.refresh(case)
+
+            logger.info("Pipeline execution completed for case %s", case.case_id)
+            return case, stage_results
+        except Exception as exc:
+            logger.error(
+                "Analysis pipeline failure for message '%s': %s",
+                email.provider_message_id,
+                str(exc),
+                exc_info=True,
+            )
+            raise
 
 
 # Global default instance and FastAPI dependency helper

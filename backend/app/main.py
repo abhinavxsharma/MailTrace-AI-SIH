@@ -7,7 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.router import api_router
 from backend.app.core.config import settings
+from backend.app.core.exception_handlers import register_exception_handlers
 from backend.app.core.logging import logger, setup_logging
+from backend.app.core.middleware import RequestIDMiddleware
 from backend.app.db.database import init_db
 
 
@@ -32,6 +34,9 @@ app = FastAPI(
     openapi_url="/openapi.json",
 )
 
+# Register request ID correlation middleware
+app.add_middleware(RequestIDMiddleware)
+
 # CORS configuration suitable for React frontend development
 app.add_middleware(
     CORSMiddleware,
@@ -40,6 +45,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register standardized global exception handlers
+register_exception_handlers(app)
 
 # Mount API router
 app.include_router(api_router, prefix="/api")

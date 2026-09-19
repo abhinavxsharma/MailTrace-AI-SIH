@@ -4,6 +4,7 @@ from typing import List, Optional, Union
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.core.logging import logger
 from backend.app.models.analysis import Analysis
 from backend.app.models.audit import AuditEvent
 from backend.app.models.case import Case, generate_case_id
@@ -45,6 +46,7 @@ def create_case(db: Session, case_in: CaseCreate) -> Case:
 
     db.commit()
     db.refresh(case)
+    logger.info("Case created: %s for message '%s'", case.case_id, case.provider_message_id)
     return case
 
 
