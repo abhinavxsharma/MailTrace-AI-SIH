@@ -10,6 +10,15 @@ __pycache__/
 .env
 .env.*
 !.env.example
+credentials.json
+token.json
+client_secret*.json
+*.pem
+*.key
+
+# Mail and forensic files (Strict zero-download policy)
+*.eml
+*.msg
 
 # Node
 node_modules/

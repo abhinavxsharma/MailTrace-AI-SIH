@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # Google OAuth & Gmail API configuration
     google_client_id: str = ""
     google_client_secret: str = ""
-    google_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
+    google_redirect_uri: str = "http://127.0.0.1:8000/api/auth/google/callback"
     google_oauth_scopes: Union[list[str], str] = [
         "https://www.googleapis.com/auth/gmail.readonly",
     ]

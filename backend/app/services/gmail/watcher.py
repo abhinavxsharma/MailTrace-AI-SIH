@@ -40,10 +40,18 @@ def start_mailbox_watch(db: Session, mailbox: Mailbox) -> Dict[str, Any]:
             status_code=401,
         )
 
+    topic = settings.google_pubsub_topic
+    if not topic or not topic.startswith("projects/") or "/topics/" not in topic:
+        raise MailTraceException(
+            message="GOOGLE_PUBSUB_TOPIC is not configured or invalid. Expected format: projects/<PROJECT_ID>/topics/<TOPIC_ID>",
+            code="INVALID_PUBSUB_TOPIC",
+            status_code=500,
+        )
+
     service = build_gmail_service(credentials=creds)
 
     watch_request_body = {
-        "topicName": settings.google_pubsub_topic,
+        "topicName": topic,
         "labelIds": ["INBOX"],
     }
 

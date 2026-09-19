@@ -16,6 +16,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from backend.app.core.config import settings
 from backend.app.db.database import Base, init_db
 from backend.app.db.session import get_db
 from backend.app.main import app
@@ -26,10 +27,13 @@ from backend.app.schemas.analysis import NormalizedEmail
 from backend.app.services.gmail.history import list_new_messages_from_history
 from backend.app.services.gmail.message_parser import parse_gmail_message
 from backend.app.services.gmail.oauth import (
+    ALLOWED_REDIRECT_URIS,
+    GoogleConfigError,
     build_authorization_url,
     exchange_code_for_credentials,
     generate_oauth_state,
     validate_and_consume_state,
+    validate_redirect_uri,
 )
 from backend.app.services.gmail.sync_service import sync_gmail_mailbox
 from backend.app.services.gmail.token_store import TokenStore
@@ -41,6 +45,17 @@ class GmailIntegrationTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        cls._orig_client_id = settings.google_client_id
+        cls._orig_client_secret = settings.google_client_secret
+        cls._orig_redirect_uri = settings.google_redirect_uri
+        cls._orig_pubsub_topic = settings.google_pubsub_topic
+
+        # Configure safe mock credentials for automated testing
+        settings.google_client_id = "test-client-id.apps.googleusercontent.com"
+        settings.google_client_secret = "test-client-secret"
+        settings.google_redirect_uri = "http://127.0.0.1:8000/api/auth/google/callback"
+        settings.google_pubsub_topic = "projects/test-project/topics/gmail-notifications"
+
         cls.test_engine = create_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
@@ -63,6 +78,10 @@ class GmailIntegrationTestCase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
+        settings.google_client_id = cls._orig_client_id
+        settings.google_client_secret = cls._orig_client_secret
+        settings.google_redirect_uri = cls._orig_redirect_uri
+        settings.google_pubsub_topic = cls._orig_pubsub_topic
         app.dependency_overrides.clear()
 
     def setUp(self) -> None:
@@ -519,6 +538,69 @@ class GmailIntegrationTestCase(unittest.TestCase):
         root_logger.removeHandler(interceptor)
         all_logs = " ".join(interceptor.records)
         self.assertNotIn(sensitive_token, all_logs)
+
+    # 16. Missing Google credentials produce clear configuration error
+    def test_missing_google_credentials_produces_error(self) -> None:
+        orig_id = settings.google_client_id
+        orig_secret = settings.google_client_secret
+        try:
+            settings.google_client_id = ""
+            settings.google_client_secret = ""
+
+            status_code, body, _ = self.request("GET", "/api/auth/google/login")
+            self.assertEqual(status_code, 500)
+            self.assertIn("error", body)
+            self.assertEqual(body["error"]["code"], "GOOGLE_CONFIG_MISSING")
+            self.assertIn("GOOGLE_CLIENT_ID", body["error"]["message"])
+        finally:
+            settings.google_client_id = orig_id
+            settings.google_client_secret = orig_secret
+
+    # 17. Invalid / random redirect URI rejected
+    def test_invalid_redirect_uri_rejected(self) -> None:
+        status_code, body, _ = self.request("GET", "/api/auth/google/login?redirect_uri=http://attacker.com/steal")
+        self.assertEqual(status_code, 400)
+        self.assertIn("error", body)
+        self.assertEqual(body["error"]["code"], "INVALID_OAUTH_STATE")
+        self.assertIn("Invalid redirect URI", body["error"]["message"])
+
+    # 18. Both 127.0.0.1 and localhost redirect URIs accepted
+    @patch("backend.app.services.gmail.oauth.Flow.from_client_config")
+    def test_localhost_and_127_redirect_uris_accepted(self, mock_flow_cls: MagicMock) -> None:
+        mock_flow = MagicMock()
+        mock_flow.authorization_url.return_value = ("https://accounts.google.com/o/oauth2/v2/auth?mock=true", "state_abc")
+        mock_flow_cls.return_value = mock_flow
+
+        # 127.0.0.1
+        status_1, body_1, _ = self.request("GET", "/api/auth/google/login?redirect_uri=http://127.0.0.1:8000/api/auth/google/callback")
+        self.assertEqual(status_1, 200)
+
+        # localhost
+        status_2, body_2, _ = self.request("GET", "/api/auth/google/login?redirect_uri=http://localhost:8000/api/auth/google/callback")
+        self.assertEqual(status_2, 200)
+
+    # 19. Invalid Pub/Sub topic format rejected
+    def test_invalid_pubsub_topic_format_rejected(self) -> None:
+        with self.TestingSessionLocal() as session:
+            mailbox = Mailbox(
+                account_email="badtopic.target@gmail.com",
+                provider="gmail",
+                status=MailboxStatus.CONNECTED.value,
+                credentials_data=json.dumps({"token": "t", "refresh_token": "r"}),
+            )
+            session.add(mailbox)
+            session.commit()
+            m_id = mailbox.id
+
+        orig_topic = settings.google_pubsub_topic
+        try:
+            settings.google_pubsub_topic = "invalid-topic-string-without-projects-prefix"
+            status_code, body, _ = self.request("POST", f"/api/mailboxes/{m_id}/watch")
+            self.assertEqual(status_code, 500)
+            self.assertIn("error", body)
+            self.assertEqual(body["error"]["code"], "INVALID_PUBSUB_TOPIC")
+        finally:
+            settings.google_pubsub_topic = orig_topic
 
 
 if __name__ == "__main__":

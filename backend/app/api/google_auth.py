@@ -41,6 +41,7 @@ def google_oauth_login(
 def google_oauth_callback(
     code: Optional[str] = Query(None, description="Google OAuth authorization code"),
     state: Optional[str] = Query(None, description="CSRF state parameter"),
+    redirect_uri: Optional[str] = Query(None, description="Redirect URI matching authorization request"),
     error: Optional[str] = Query(None, description="Error returned by Google OAuth consent"),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -63,7 +64,7 @@ def google_oauth_callback(
 
     # 1. Exchange code with CSRF state verification
     try:
-        credentials = exchange_code_for_credentials(code=code, state=state)
+        credentials = exchange_code_for_credentials(code=code, state=state, redirect_uri=redirect_uri)
     except MailTraceException:
         raise
     except Exception as exc:

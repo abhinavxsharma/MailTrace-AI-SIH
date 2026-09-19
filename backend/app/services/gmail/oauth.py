@@ -23,6 +23,42 @@ class OAuthStateError(MailTraceException):
         super().__init__(message=message, code=code, status_code=status_code)
 
 
+class GoogleConfigError(MailTraceException):
+    """Exception raised when required Google Cloud configuration is missing."""
+
+    def __init__(
+        self,
+        message: str = "Google OAuth credentials are not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.",
+        code: str = "GOOGLE_CONFIG_MISSING",
+        status_code: int = 500,
+    ) -> None:
+        super().__init__(message=message, code=code, status_code=status_code)
+
+
+ALLOWED_REDIRECT_URIS = {
+    "http://127.0.0.1:8000/api/auth/google/callback",
+    "http://localhost:8000/api/auth/google/callback",
+}
+
+
+def validate_redirect_uri(redirect_uri: Optional[str]) -> str:
+    """Validate that the redirect URI is permissible and not a random URL."""
+    target = redirect_uri or settings.google_redirect_uri
+    if target not in ALLOWED_REDIRECT_URIS and target != settings.google_redirect_uri:
+        raise OAuthStateError(
+            f"Invalid redirect URI '{target}'. Allowed redirect URIs: {', '.join(sorted(ALLOWED_REDIRECT_URIS))}"
+        )
+    return target
+
+
+def validate_oauth_config() -> None:
+    """Validate that GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are configured."""
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise GoogleConfigError(
+            "Google OAuth credentials are not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your local .env file."
+        )
+
+
 def _cleanup_expired_states() -> None:
     """Purge expired state tokens from the in-memory cache."""
     current_time = time.time()
@@ -54,15 +90,20 @@ def validate_and_consume_state(state: Optional[str]) -> bool:
     return True
 
 
-def get_client_config() -> dict:
+def get_client_config(redirect_uri: Optional[str] = None) -> dict:
     """Construct Google OAuth client config dictionary from centralized settings."""
+    target_redirect = redirect_uri or settings.google_redirect_uri
+    uris = list(ALLOWED_REDIRECT_URIS)
+    if target_redirect not in uris:
+        uris.append(target_redirect)
+
     return {
         "web": {
             "client_id": settings.google_client_id,
             "client_secret": settings.google_client_secret,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [settings.google_redirect_uri],
+            "redirect_uris": uris,
         }
     }
 
@@ -73,10 +114,11 @@ def build_authorization_url(redirect_uri: Optional[str] = None) -> Tuple[str, st
     Returns:
         Tuple of (authorization_url, state).
     """
+    validate_oauth_config()
+    target_redirect = validate_redirect_uri(redirect_uri)
     state = generate_oauth_state()
-    target_redirect = redirect_uri or settings.google_redirect_uri
 
-    client_config = get_client_config()
+    client_config = get_client_config(redirect_uri=target_redirect)
     flow = Flow.from_client_config(
         client_config=client_config,
         scopes=settings.google_oauth_scopes_list,
@@ -116,8 +158,9 @@ def exchange_code_for_credentials(
     if not validate_and_consume_state(state):
         raise OAuthStateError("OAuth state validation failed. State may have expired or been reused.")
 
-    target_redirect = redirect_uri or settings.google_redirect_uri
-    client_config = get_client_config()
+    validate_oauth_config()
+    target_redirect = validate_redirect_uri(redirect_uri)
+    client_config = get_client_config(redirect_uri=target_redirect)
 
     try:
         flow = Flow.from_client_config(
