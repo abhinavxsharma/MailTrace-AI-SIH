@@ -14,6 +14,12 @@ from backend.app.schemas.case import (
     CaseRead,
     CaseStatusUpdate,
 )
+from backend.app.schemas.mail_event import (
+    MailEvent,
+    MailEventResponse,
+    MailEventStatus,
+    MailEventType,
+)
 from backend.app.schemas.mailbox import (
     MailboxBase,
     MailboxCreate,
@@ -36,4 +42,8 @@ __all__ = [
     "AnalysisStartResponse",
     "NormalizedEmail",
     "AuditEventRead",
+    "MailEvent",
+    "MailEventResponse",
+    "MailEventType",
+    "MailEventStatus",
 ]
