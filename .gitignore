@@ -1,0 +1,34 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+build/
+.vite/
+
+# Logs / local data
+*.log
+*.sqlite
+*.db
+
+# ML model files
+ml/models/*/model.safetensors
+ml/models/**/*.bin
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
