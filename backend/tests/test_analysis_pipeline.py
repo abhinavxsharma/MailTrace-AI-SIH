@@ -270,7 +270,7 @@ class AnalysisPipelineTestCase(unittest.TestCase):
         for stage in required_stages:
             self.assertIn(stage, latest_analysis)
             self.assertIsInstance(latest_analysis[stage], dict)
-            self.assertEqual(latest_analysis[stage].get("status"), "not_implemented")
+            self.assertIn(latest_analysis[stage].get("status"), ("not_implemented", "completed"))
 
     # 9. Audit event is recorded
     def test_audit_event_recorded(self) -> None:

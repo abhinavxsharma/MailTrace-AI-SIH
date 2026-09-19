@@ -151,6 +151,12 @@ class AnalysisPipeline:
                     )
                 )
 
+        # Update case risk score if computed by the risk stage
+        if "risk" in stage_results and isinstance(stage_results["risk"], dict):
+            calculated_score = stage_results["risk"].get("total_score")
+            if calculated_score is not None and isinstance(calculated_score, int):
+                case.risk_score = calculated_score
+
         # 4. Persist Analysis record with structured stage results
         analysis = Analysis(
             case_id=case.id,
