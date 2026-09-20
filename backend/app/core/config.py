@@ -31,7 +31,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     app_name: str = "MAILTRACE AI"
     app_version: str = "0.1.0"
+    app_env: str = "development"
     debug: bool = False
+    secret_key: str = "your-random-secret-key"
     database_url: str = "sqlite:///./mailtrace.db"
     model_path: str = "ml/models/dataset3_v1.0.0"
 
@@ -55,6 +57,8 @@ class Settings(BaseSettings):
     google_redirect_uri: str = "http://127.0.0.1:8000/api/auth/google/callback"
     google_oauth_scopes: Union[list[str], str] = [
         "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.settings.basic",
     ]
     google_pubsub_topic: str = "projects/mailtrace-ai/topics/gmail-notifications"
 
@@ -114,6 +118,34 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # Validators                                                           #
     # ------------------------------------------------------------------ #
+    @field_validator("secret_key", mode="after")
+    @classmethod
+    def _validate_secret_key(cls, v: str, info) -> str:
+        """
+        Validate that in production (app_env=production), a real, secure SECRET_KEY
+        must be supplied via environment variable rather than using default/sample values.
+        """
+        import os
+        env = os.environ.get("APP_ENV", "").strip().lower()
+        if hasattr(info, "data") and "app_env" in info.data:
+            env = str(info.data.get("app_env", "")).strip().lower()
+
+        insecure_keys = {
+            "your-random-secret-key",
+            "mailtrace_production_secret_key_sih2024",
+            "secret",
+            "changeme",
+            "default",
+            "",
+        }
+
+        if env == "production" and (not v or v in insecure_keys):
+            raise ValueError(
+                "In production configuration (APP_ENV=production), SECRET_KEY must be provided "
+                "via a real environment variable and cannot use default/sample values."
+            )
+        return v
+
     @field_validator("GOOGLE_OAUTH_TOKEN_FILE", mode="before")
     @classmethod
     def _normalise_token_path(cls, v: str) -> str:

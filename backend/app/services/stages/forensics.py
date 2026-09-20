@@ -24,10 +24,21 @@ class ForensicsService(BaseAnalysisStage):
             finding_codes = {f.code for f in header_forensics.findings}
 
             # Extract identity indicators consumed by the deterministic risk engine
+            import re
             sender_reply_to_mismatch = "SENDER_REPLY_TO_MISMATCH" in finding_codes
             sender_return_path_mismatch = "SENDER_RETURN_PATH_MISMATCH" in finding_codes
             domain_spoofing = "DOMAIN_SPOOFING" in finding_codes or "DISPLAY_NAME_SPOOFING" in finding_codes
             display_name_spoofing = "DISPLAY_NAME_SPOOFING" in finding_codes
+
+            free_webmail_domains = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com", "protonmail.com", "icloud.com"}
+            sender_domain = (parsed.from_address.domain or "").lower() if parsed.from_address else ""
+            display_or_subj = f"{getattr(parsed.from_address, 'display_name', '') or ''} {parsed.subject or ''}".lower()
+            free_webmail_impersonation = (sender_domain in free_webmail_domains) and bool(
+                re.search(r"\b(executive|ceo|cfo|wire transfer|invoice|payroll|security team|accounts? dept|account verification|payment instruction)\b", display_or_subj)
+            )
+            if free_webmail_impersonation:
+                display_name_spoofing = True
+                domain_spoofing = True
 
             body_snippet = (parsed.body_text or "")[:500]
             header_items = [{"name": h.name, "value": h.normalized_value or h.original_value} for h in parsed.headers[:50]]
@@ -71,7 +82,8 @@ class ForensicsService(BaseAnalysisStage):
                     "sender_return_path_mismatch": sender_return_path_mismatch,
                     "domain_spoofing": domain_spoofing,
                     "display_name_spoofing": display_name_spoofing,
-                    "inconsistent_headers": len(header_forensics.findings) > 0,
+                    "free_webmail_impersonation": free_webmail_impersonation,
+                    "inconsistent_headers": len(header_forensics.findings) > 0 or free_webmail_impersonation,
                 },
             }
         except Exception as exc:

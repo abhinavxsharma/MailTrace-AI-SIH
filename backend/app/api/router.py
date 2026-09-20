@@ -59,3 +59,11 @@ def readiness_check(db: Session = Depends(get_db)) -> Any:
         "status": "ready",
         "database": database_status,
     }
+
+
+@api_router.get("/ml/health", tags=["ml"])
+def ml_health_check() -> Dict[str, Any]:
+    """Lightweight ML model health and readiness diagnostics."""
+    from ml.inference.loader import get_ml_health
+
+    return get_ml_health()

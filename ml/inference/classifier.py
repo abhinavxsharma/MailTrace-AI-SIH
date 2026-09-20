@@ -83,6 +83,7 @@ def classify_email(
             probs = torch.softmax(logits, dim=-1).squeeze(0)
 
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        active_loader.record_inference_latency(latency_ms)
 
         # 4. Resolve label mapping
         id2label = getattr(model.config, "id2label", None)

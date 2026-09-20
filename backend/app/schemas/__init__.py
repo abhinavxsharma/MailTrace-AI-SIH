@@ -20,12 +20,18 @@ from backend.app.schemas.mail_event import (
     MailEventStatus,
     MailEventType,
 )
+from backend.app.schemas.alert import (
+    SecurityAlertCreate,
+    SecurityAlertRead,
+    SecurityAlertStatusUpdate,
+)
 from backend.app.schemas.mailbox import (
     MailboxBase,
     MailboxCreate,
     MailboxRead,
     MailboxStatusUpdate,
 )
+
 
 __all__ = [
     "MailboxBase",
@@ -46,4 +52,7 @@ __all__ = [
     "MailEventResponse",
     "MailEventType",
     "MailEventStatus",
+    "SecurityAlertCreate",
+    "SecurityAlertRead",
+    "SecurityAlertStatusUpdate",
 ]

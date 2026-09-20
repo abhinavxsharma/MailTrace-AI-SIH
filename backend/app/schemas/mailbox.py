@@ -34,3 +34,31 @@ class MailboxRead(MailboxBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ReportSpamResponse(BaseModel):
+    """Response schema for reporting an email message as spam."""
+
+    success: bool = Field(default=True, description="Indicates whether the report spam action succeeded")
+    action: str = Field(default="REPORT_SPAM", description="Remediation action identifier")
+    message_id: str = Field(..., description="Provider message ID reported")
+    status: str = Field(default="REPORTED", description="Outcome status of spam classification")
+
+
+class TrashMessageResponse(BaseModel):
+    """Response schema for trashing an email message."""
+
+    success: bool = Field(default=True, description="Indicates whether the trash action succeeded")
+    action: str = Field(default="DELETE", description="Remediation action identifier")
+    message_id: str = Field(..., description="Provider message ID moved to trash")
+    status: str = Field(default="TRASHED", description="Outcome status confirming message moved to trash")
+
+
+class BlockSenderResponse(BaseModel):
+    """Response schema for blocking a sender via a Gmail filter."""
+
+    success: bool = Field(default=True, description="Indicates whether sender block was applied or verified")
+    action: str = Field(default="BLOCK_SENDER", description="Remediation action identifier")
+    sender: str = Field(..., description="Canonical email address of the blocked sender")
+    filter_id: Optional[str] = Field(None, description="Gmail filter ID created or existing")
+    already_blocked: bool = Field(default=False, description="True if an active filter already existed for this sender")

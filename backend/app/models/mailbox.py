@@ -9,6 +9,7 @@ from backend.app.db.database import Base
 from backend.app.models.enums import MailboxStatus
 
 if TYPE_CHECKING:
+    from backend.app.models.alert import SecurityAlert
     from backend.app.models.case import Case
 
 
@@ -46,6 +47,12 @@ class Mailbox(Base):
         back_populates="mailbox",
         cascade="all, delete-orphan",
     )
+    alerts: Mapped[List["SecurityAlert"]] = relationship(
+        "SecurityAlert",
+        back_populates="mailbox",
+        cascade="all, delete-orphan",
+    )
+
 
     @property
     def has_credentials(self) -> bool:

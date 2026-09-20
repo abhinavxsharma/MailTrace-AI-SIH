@@ -26,9 +26,17 @@ class CorrelationService(BaseAnalysisStage):
 
             parsed = parse_email(email)
             engine = CorrelationEngine()
+
+            auth_res = None
+            try:
+                from forensics.authentication.verifier import verify_authentication
+                auth_res = verify_authentication(parsed)
+            except Exception:
+                pass
+
             email_ctx = AnalyzedEmailContext(
                 parsed_email=parsed,
-                auth_result=None,
+                auth_result=auth_res,
                 ml_result=None,
             )
             email_graph = engine.build_email_graph(email_ctx)
@@ -92,7 +100,39 @@ class CorrelationService(BaseAnalysisStage):
                                 "shared_indicator": m.shared_indicator,
                             })
 
-            campaign_detected = len(all_matches) > 0
+            # Execute semantic campaign correlation (Phase 7)
+            from backend.app.services.intelligence.semantic_correlation import correlate_semantic_campaigns
+
+            prior_case_candidates = [
+                {
+                    "case_id": pc.case_id,
+                    "subject": pc.subject or "",
+                    "body": pc.subject or "",
+                    "sender": pc.sender or "",
+                }
+                for pc in (prior_cases if db is not None else [])
+            ]
+
+            semantic_intel = correlate_semantic_campaigns(
+                current_case_id=context.get("case_id", "current"),
+                current_subject=email.subject or "",
+                current_body=email.body or "",
+                current_sender=email.sender or "",
+                prior_cases=prior_case_candidates,
+            )
+
+            if semantic_intel.has_potential_campaign:
+                campaign_detected = True
+                for sm in semantic_intel.matches:
+                    related_cases.append({
+                        "case_id": sm.target_case_id,
+                        "provider_message_id": "",
+                        "subject": sm.target_subject,
+                        "reason": f"Semantic Similarity ({int(sm.similarity * 100)}%)",
+                        "shared_indicator": ", ".join(sm.shared_language_signals[:2]) or "High embedding similarity",
+                    })
+
+            campaign_detected = len(all_matches) > 0 or semantic_intel.has_potential_campaign
             campaign_id = None
             if campaign_detected:
                 clusterer = CampaignClusterer(engine)
@@ -132,7 +172,9 @@ class CorrelationService(BaseAnalysisStage):
                     "shared_indicators": list({m.shared_indicator for m in all_matches}),
                     "correlation_reasons": list({m.reason for m in all_matches}),
                     "related_cases": related_cases,
+                    "semantic_intelligence": semantic_intel.model_dump(),
                 },
+                "semantic_campaign": semantic_intel.model_dump(),
                 "timeline": [ev.model_dump() for ev in timeline.events],
             }
         except Exception as exc:

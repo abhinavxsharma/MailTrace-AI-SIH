@@ -79,8 +79,8 @@ def score_identity(evidence: Optional[Dict[str, Any]]) -> int:
         score += 8
     if evidence.get("domain_spoofing") is True or evidence.get("domain_spoofing_detected") is True:
         score += 6
-    if evidence.get("display_name_spoofing") is True:
-        score += 4
+    if evidence.get("display_name_spoofing") is True or evidence.get("free_webmail_impersonation") is True:
+        score += 6
     if evidence.get("inconsistent_headers") is True:
         score += 4
 
@@ -147,7 +147,7 @@ def score_url_domain(evidence: Optional[Dict[str, Any]]) -> int:
 
     if evidence.get("suspicious_domain") is True:
         score += 8
-    if evidence.get("suspicious_url") is True:
+    if evidence.get("suspicious_url") is True or evidence.get("suspicious_urls_detected") is True:
         score += 6
     if evidence.get("domain_mismatch") is True:
         score += 4

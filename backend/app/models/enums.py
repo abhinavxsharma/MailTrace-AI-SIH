@@ -28,3 +28,13 @@ class MailboxStatus(str, Enum):
     CONNECTED = "CONNECTED"
     DISCONNECTED = "DISCONNECTED"
     ERROR = "ERROR"
+
+
+class AlertStatus(str, Enum):
+    """Lifecycle status of a mailbox threat alert."""
+
+    UNREAD = "UNREAD"
+    READ = "READ"
+    DISMISSED = "DISMISSED"
+    INVESTIGATING = "INVESTIGATING"
+    RESOLVED = "RESOLVED"

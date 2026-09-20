@@ -37,6 +37,102 @@ interface MailboxMessage {
   date?: string | null;
 }
 
+interface AuthenticationSummary {
+  spf: string;
+  dkim: string;
+  dmarc: string;
+  authenticated: boolean;
+}
+
+interface PreOpenScanResult {
+  message_id: string;
+  thread_id?: string | null;
+  sender: string;
+  sender_name?: string | null;
+  subject: string;
+  received_at?: string | null;
+  verdict: "BENIGN" | "SUSPICIOUS" | "MALICIOUS" | "PENDING";
+  risk_score: number;
+  risk_level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  confidence?: number | null;
+  reasons: string[];
+  indicators: string[];
+  authentication_summary: AuthenticationSummary;
+  recommended_action: string;
+  can_investigate: boolean;
+  nlp_intents?: NlpThreatIntentItem[];
+  extracted_entities?: ExtractedEntityItem[];
+  breakdown?: Record<string, number> | null;
+}
+
+export interface NlpThreatIntentItem {
+  intent: string;
+  confidence: number;
+  evidence: string;
+  explanation: string;
+  source?: string;
+}
+
+export interface ExtractedEntityItem {
+  type: string;
+  value: string;
+  normalized_value?: string;
+  context?: string;
+}
+
+export interface SemanticCampaignMatchItem {
+  relationship_type: string;
+  target_case_id: string;
+  target_subject: string;
+  similarity: number;
+  confidence: string;
+  evidence: string[];
+  shared_language_signals: string[];
+  technical_correlation?: Record<string, any>;
+}
+
+export interface SemanticCampaignIntelligenceItem {
+  has_potential_campaign: boolean;
+  potential_related_cases_count: number;
+  highest_similarity: number;
+  overall_confidence: string;
+  shared_language_signals: string[];
+  matches: SemanticCampaignMatchItem[];
+  technical_correlation_summary?: Record<string, any>;
+}
+
+export interface SecurityAlertItem {
+  id: number;
+  alert_id: string;
+  mailbox_id: number;
+  message_id: string;
+  thread_id?: string | null;
+  case_id?: number | null;
+  sender: string;
+  sender_name?: string | null;
+  subject: string;
+  verdict: "BENIGN" | "SUSPICIOUS" | "MALICIOUS";
+  risk_score: number;
+  risk_level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  confidence: number;
+  title: string;
+  summary: string;
+  reasons: string[];
+  indicators: string[];
+  recommended_action: string;
+  status: "UNREAD" | "READ" | "DISMISSED" | "INVESTIGATING" | "RESOLVED";
+  created_at: string;
+  updated_at: string;
+}
+
+interface ForensicTimelineEvent {
+  timestamp: string | null;
+  event_type: string;
+  entity_id: string;
+  description: string;
+  evidence?: Record<string, any>;
+}
+
 interface ScenarioTemplate {
   id: string;
   title: string;
@@ -83,155 +179,284 @@ interface ScenarioTemplate {
     geolocation: string;
   };
   rules: Array<{ name: string; score: number; desc?: string }>;
+  nlp_intents?: NlpThreatIntentItem[];
+  extracted_entities?: ExtractedEntityItem[];
+  semantic_campaign?: SemanticCampaignIntelligenceItem;
+  timeline?: ForensicTimelineEvent[];
+  related_cases?: Array<{
+    case_id: string;
+    provider_message_id?: string;
+    subject?: string;
+    reason?: string;
+    shared_indicator?: string;
+  }>;
 }
 
-const DEMO_SCENARIOS: Record<string, ScenarioTemplate> = {
-  bec: {
-    id: "bec",
-    title: "BEC Wire Transfer",
-    category: "HIGH",
-    description: "CFO impersonation + DMARC fail + banking redirect",
-    case_id: "MT-2026-000354",
-    subject: "URGENT: Updated Vendor Invoice - Action Required",
-    sender: "CFO - Acme Finance <cfo@acme-finance.com>",
-    recipient: "None",
-    reply_to: "acme.invoice.alert@gmail.com",
-    date: "Tue, 15 Sep 2026 10:18:40 +0000",
-    message_id: "<test-bec-20260915-001@notify-acme.co>",
-    body_text:
-      "Hello Accounts Team,\n\nThis is an urgent request from the CFO.\nWe have changed our banking partner and the beneficiary account must be updated today.\nPlease process the transfer immediately using the secure finance portal:\nVerify Invoice: https://notify-acme.co/auth/verify\n\nDo not call to confirm this request as I am in a meeting.\nPlease treat this as confidential and complete it today.\n\nRegards,\nCFO\nAcme Finance",
-    classification: "MALICIOUS",
-    risk_score: 73,
-    ai_confidence: 0.998,
-    bars: { ai_threat: 25, identity: 20, auth: 3, url_domain: 15, infra: 0, campaign: 10 },
-    auth: {
-      spf: "UNKNOWN",
-      dkim: "UNKNOWN",
-      dmarc: "UNKNOWN",
-      spf_detail: "No Policy Published\nNo SPF TXT record found in DNS.",
-      dkim_detail: "Unsigned\nNo DKIM signature in headers.",
-      dmarc_detail: "No Policy\nNo DMARC TXT record found.",
-    },
-    identity: {
-      from_domain: "acme-finance.com",
-      reply_to_domain: "gmail.com",
-      return_path_domain: "notify-acme.co",
-      spoofing_detected: true,
-    },
-    infra: {
-      source_ip: "198.51.100.42",
-      reverse_dns: "No PTR record",
-      organization: "Internet Assigned Numbers Authority",
-      asn: "Unavailable",
-      geolocation: "Unavailable",
-    },
-    rules: [
-      { name: "No valid DMARC policy protecting sender domain", score: 0 },
-      { name: "Suspicious Link Keywords", score: 10, desc: "Observed URLs contain credential verification, login, or portal tokens" },
-      { name: "Credential Verification Target", score: 5, desc: "Message directs recipient to external authentication/payment verification portal" },
-      { name: "Campaign Correlation", score: 10, desc: "Potential campaign relationship detected with 172 related case(s) sharing 1201 threat indicator(s)" },
-    ],
+const EMPTY_INVESTIGATION_CASE: ScenarioTemplate = {
+  id: "",
+  title: "No Active Investigation",
+  category: "LOW",
+  description: "Select an email from your Security Inbox to view forensic telemetry.",
+  case_id: "N/A",
+  subject: "No email selected",
+  sender: "None",
+  recipient: "None",
+  reply_to: "None",
+  date: "—",
+  message_id: "—",
+  body_text: "Select a message from the inbox to analyze raw headers, cryptographic authentication, AI threat scoring, and source infrastructure.",
+  classification: "BENIGN",
+  risk_score: 0,
+  ai_confidence: 0,
+  bars: { ai_threat: 0, identity: 0, auth: 0, url_domain: 0, infra: 0, campaign: 0 },
+  auth: {
+    spf: "NONE",
+    dkim: "NONE",
+    dmarc: "NONE",
+    spf_detail: "No email selected for authentication diagnostics.",
+    dkim_detail: "No email selected for cryptographic signature analysis.",
+    dmarc_detail: "No email selected for policy evaluation.",
   },
-  phishing: {
-    id: "phishing",
-    title: "Credential Phishing",
-    category: "HIGH",
-    description: "Typosquatted sender (micros0ft) + deadline pressure + portal",
-    case_id: "MT-2026-000355",
-    subject: "Action Required: Re-authenticate Microsoft 365 Password Immediately",
-    sender: "Microsoft IT Support <support@micros0ft-security-portal.com>",
-    recipient: "staff@company.com",
-    reply_to: "recovery@micros0ft-auth.net",
-    date: "Wed, 16 Sep 2026 14:02:11 +0000",
-    message_id: "<phish-2026-0916@micros0ft-security-portal.com>",
-    body_text:
-      "Your Office 365 corporate credentials expire within 24 hours.\nTo prevent loss of system access, confirm your credentials now:\nhttps://micros0ft-security-portal.com/login/auth\n\nIT Security Operations",
-    classification: "MALICIOUS",
-    risk_score: 88,
-    ai_confidence: 0.999,
-    bars: { ai_threat: 25, identity: 20, auth: 15, url_domain: 15, infra: 8, campaign: 5 },
-    auth: {
-      spf: "FAIL",
-      dkim: "FAIL",
-      dmarc: "FAIL",
-      spf_detail: "Domain does not authorize IP 203.0.113.80",
-      dkim_detail: "Signature body hash verification failed",
-      dmarc_detail: "Reject policy active on domain",
-    },
-    identity: {
-      from_domain: "micros0ft-security-portal.com",
-      reply_to_domain: "micros0ft-auth.net",
-      return_path_domain: "attacker-relay.host",
-      spoofing_detected: true,
-    },
-    infra: {
-      source_ip: "203.0.113.80",
-      reverse_dns: "relay-nl-08.bulletproof-host.xyz",
-      organization: "Offshore VPS Networks Ltd",
-      asn: "AS49210",
-      geolocation: "Amsterdam, Netherlands",
-    },
-    rules: [
-      { name: "Homograph Domain / Typosquatting (micros0ft)", score: 20 },
-      { name: "SPF & DKIM Cryptographic Failure", score: 15 },
-      { name: "Credential Harvesting Link", score: 15 },
-    ],
+  identity: {
+    from_domain: "—",
+    reply_to_domain: "—",
+    return_path_domain: "—",
+    spoofing_detected: false,
   },
-  legit: {
-    id: "legit",
-    title: "Legitimate Internal",
-    category: "LOW",
-    description: "Internal monthly report, SPF + DKIM pass, benign",
-    case_id: "MT-2026-000356",
-    subject: "Monthly Engineering Project Status Report — September",
-    sender: "Lead Engineer <lead@company-internal.org>",
-    recipient: "team@company-internal.org",
-    reply_to: "lead@company-internal.org",
-    date: "Thu, 17 Sep 2026 09:15:00 +0000",
-    message_id: "<eng-report-sep-2026@company-internal.org>",
-    body_text:
-      "Hi team,\n\nThe engineering progress report for September is now published on the internal wiki:\nhttps://wiki.company-internal.org/reports/sep-2026\n\nThanks everyone for your contributions!\nBest regards,\nEngineering Lead",
-    classification: "BENIGN",
-    risk_score: 4,
-    ai_confidence: 0.985,
-    bars: { ai_threat: 0, identity: 0, auth: 0, url_domain: 0, infra: 0, campaign: 4 },
-    auth: {
-      spf: "PASS",
-      dkim: "PASS",
-      dmarc: "PASS",
-      spf_detail: "IP 198.51.100.10 authorized in SPF record",
-      dkim_detail: "Valid RSA-SHA256 signature verified",
-      dmarc_detail: "Strict alignment passed",
-    },
-    identity: {
-      from_domain: "company-internal.org",
-      reply_to_domain: "company-internal.org",
-      return_path_domain: "company-internal.org",
-      spoofing_detected: false,
-    },
-    infra: {
-      source_ip: "198.51.100.10",
-      reverse_dns: "mail-out.company-internal.org",
-      organization: "Internal Enterprise Corp",
-      asn: "AS15169",
-      geolocation: "San Jose, CA, USA",
-    },
-    rules: [
-      { name: "Clean Domain Reputation", score: 0 },
-      { name: "Cryptographic Authenticity Verified", score: 0 },
-    ],
+  infra: {
+    source_ip: "—",
+    reverse_dns: "—",
+    organization: "—",
+    asn: "—",
+    geolocation: "—",
+  },
+  rules: [],
+  nlp_intents: [],
+  extracted_entities: [],
+  semantic_campaign: {
+    has_potential_campaign: false,
+    potential_related_cases_count: 0,
+    highest_similarity: 0,
+    overall_confidence: "LOW",
+    shared_language_signals: [],
+    matches: [],
   },
 };
+
+// =============================================================================
+// PRE-OPEN SCAN HELPERS & EXPLAINABILITY ENGINE (CHUNK 2)
+// =============================================================================
+const INDICATOR_EXPLANATIONS: Record<string, string> = {
+  from_reply_to_mismatch: "Sender address and Reply-To address do not match.",
+  IDENTITY_REPLY_TO_MISMATCH: "Sender address and Reply-To address do not match.",
+  FROM_REPLY_TO_MISMATCH: "Sender address and Reply-To address do not match.",
+  from_return_path_mismatch: "Return-Path envelope domain differs from sender address.",
+  IDENTITY_RETURN_PATH_MISMATCH: "Return-Path envelope domain differs from sender address.",
+  FROM_RETURN_PATH_MISMATCH: "Return-Path envelope domain differs from sender address.",
+  executive_impersonation: "Message appears to use executive impersonation signals.",
+  IDENTITY_DISPLAY_NAME_SPOOFING: "Message appears to use executive impersonation signals.",
+  financial_lure: "Message contains a financial or payment request.",
+  LURE_FINANCIAL_REQUEST: "Message contains a financial or payment request.",
+  urgency_manipulation: "Message uses urgency or time-pressure language.",
+  LURE_HIGH_URGENCY: "Message uses urgency or time-pressure language.",
+  credential_harvesting: "Message prompts credential login or account verification.",
+  LURE_CREDENTIAL_HARVESTING: "Message prompts credential login or account verification.",
+  URL_IP_LITERAL_HOST: "Message links to an IP address instead of a domain name.",
+  URL_CREDENTIAL_PATH_KEYWORD: "Message contains suspicious links pointing to credential capture paths.",
+  AUTH_DMARC_FAIL: "DMARC authentication policy failed for the sender domain.",
+  AUTH_SPF_FAIL: "SPF sender verification failed.",
+  AUTH_DKIM_FAIL: "Cryptographic DKIM signature failed verification.",
+  AI_MALICIOUS_PREDICTION: "AI threat model detected deceptive phishing or scam language.",
+};
+
+function formatReason(raw: string): string {
+  if (INDICATOR_EXPLANATIONS[raw]) {
+    return INDICATOR_EXPLANATIONS[raw];
+  }
+  return raw;
+}
+
+function getRiskMeta(score: number, level?: string, verdict?: string) {
+  const normVerdict = (verdict || "").toUpperCase().trim();
+  const normLevel = (level || "").toUpperCase().trim();
+
+  // Explicit malicious verdict or critical level overrides numeric score
+  if (
+    normVerdict === "MALICIOUS" ||
+    normVerdict === "PHISHING" ||
+    score >= 85 ||
+    normLevel === "CRITICAL"
+  ) {
+    return {
+      level: "CRITICAL" as const,
+      label: "🛑 THREAT",
+      shortLabel: "CRITICAL",
+      color: "#DC2626",
+      bgColor: "#FEE2E2",
+      borderColor: "#FECACA",
+    };
+  }
+  if (
+    normVerdict === "SUSPICIOUS" ||
+    score >= 70 ||
+    normLevel === "HIGH"
+  ) {
+    return {
+      level: "HIGH" as const,
+      label: "🚨 HIGH RISK",
+      shortLabel: "HIGH RISK",
+      color: "#EA580C",
+      bgColor: "#FFEDD5",
+      borderColor: "#FED7AA",
+    };
+  }
+  if (score >= 40 || normLevel === "MEDIUM") {
+    return {
+      level: "MEDIUM" as const,
+      label: "⚠ SUSPICIOUS",
+      shortLabel: "SUSPICIOUS",
+      color: "#D97706",
+      bgColor: "#FEF3C7",
+      borderColor: "#FDE68A",
+    };
+  }
+  return {
+    level: "LOW" as const,
+    label: "✅ SAFE",
+    shortLabel: "SAFE",
+    color: "#059669",
+    bgColor: "#D1FAE5",
+    borderColor: "#A7F3D0",
+  };
+}
+
+function getPrimaryReason(scan?: PreOpenScanResult | null): string {
+  if (!scan || !scan.reasons || scan.reasons.length === 0) {
+    return "Evaluated before opening";
+  }
+  // Find first specific reason that is NOT generic AI boilerplate if other reasons exist
+  const specific = scan.reasons.find(
+    (r) =>
+      !r.toLowerCase().startsWith("ai threat model") &&
+      !r.toLowerCase().startsWith("ai sequence model")
+  );
+  if (specific) {
+    return formatReason(specific);
+  }
+  return formatReason(scan.reasons[0]);
+}
+
+function parseSender(fromStr?: string | null) {
+  if (!fromStr) return { name: "Unknown Sender", email: "" };
+  if (fromStr.includes("<")) {
+    const parts = fromStr.split("<");
+    const name = parts[0].trim().replace(/^["']|["']$/g, "") || "Sender";
+    const email = parts[1].replace(">", "").trim();
+    return { name, email };
+  }
+  if (fromStr.includes("@")) {
+    return { name: fromStr.split("@")[0], email: fromStr };
+  }
+  return { name: fromStr, email: "" };
+}
+
+function getTimelineMeta(ev: ForensicTimelineEvent) {
+  switch (ev.event_type) {
+    case "EMAIL_DATE":
+      return {
+        name: "ORIGINATING DATE",
+        tag: "RFC 5322 Date Header",
+        dotColor: "#3B82F6",
+      };
+    case "RECEIVED_HOP":
+      return {
+        name: "MTA RELAY HOP",
+        tag: "SMTP Transport Routing",
+        dotColor: "#8B5CF6",
+      };
+    case "AUTH_SPF":
+      return {
+        name: "SPF VALIDATION",
+        tag: "RFC 7208 Evaluation",
+        dotColor: (ev.description || "").includes("PASS") ? "#10B981" : "#EF4444",
+      };
+    case "AUTH_DKIM":
+      return {
+        name: "DKIM SIGNATURE",
+        tag: "RFC 6376 Cryptographic",
+        dotColor: (ev.description || "").includes("PASS") ? "#10B981" : "#EF4444",
+      };
+    case "AUTH_DMARC":
+      return {
+        name: "DMARC POLICY",
+        tag: "RFC 7489 Alignment",
+        dotColor: (ev.description || "").includes("PASS") ? "#10B981" : "#EF4444",
+      };
+    case "AUTH_EVALUATION":
+      return {
+        name: "AUTHENTICATION AUDIT",
+        tag: "Security Protocols",
+        dotColor: "#10B981",
+      };
+    case "FORENSIC_INSPECTION":
+      return {
+        name: "FORENSIC INSPECTION",
+        tag: "In-Memory Parsing",
+        dotColor: "#2563EB",
+      };
+    case "CORRELATION_EVENT":
+      return {
+        name: "CAMPAIGN CORRELATED",
+        tag: "Cross-Case Relationship",
+        dotColor: "#EF4444",
+      };
+    case "INTELLIGENCE_RDAP":
+      return {
+        name: "WHOIS / RDAP INTELLIGENCE",
+        tag: "Domain Registry",
+        dotColor: "#06B6D4",
+      };
+    default:
+      return {
+        name: (ev.event_type || "EVENT").replace(/_/g, " "),
+        tag: "Forensic Observation",
+        dotColor: "#64748B",
+      };
+  }
+}
+
+function formatTimelineDate(timestamp: string | null, fallbackDate?: string): string {
+  if (timestamp) {
+    try {
+      const d = new Date(timestamp);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+      }
+    } catch {
+      // fallback
+    }
+    return timestamp;
+  }
+  return fallbackDate || "Real-Time Ingestion";
+}
 
 export default function App() {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 800;
 
-  const [activeScenario, setActiveScenario] = useState<ScenarioTemplate>(DEMO_SCENARIOS.bec);
+  const [activeScenario, setActiveScenario] = useState<ScenarioTemplate>(EMPTY_INVESTIGATION_CASE);
   const [evidenceName, setEvidenceName] = useState<string>("evidence.eml");
   const [shaHash, setShaHash] = useState<string>("UNKNOWN");
   const [selectedTab, setSelectedTab] = useState<"overview" | "graph" | "timeline" | "campaign">("overview");
   const [bodyFormat, setBodyFormat] = useState<"rendered" | "plaintext" | "headers">("rendered");
+  const [mlHealth, setMlHealth] = useState<{ status: string; loaded: boolean; warm: boolean } | null>(null);
 
   // Gmail OAuth and live inbox state
   const [backendReady, setBackendReady] = useState<boolean | null>(null);
@@ -242,11 +467,42 @@ export default function App() {
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [mobileViewingReport, setMobileViewingReport] = useState<boolean>(false);
 
+  // Pre-Open Threat Scan state (Chunk 1 backend -> Chunk 2 UX)
+  const [preScanCache, setPreScanCache] = useState<Record<string, PreOpenScanResult>>({});
+  const [preScanningIds, setPreScanningIds] = useState<Record<string, boolean>>({});
+  const [activePreScanResult, setActivePreScanResult] = useState<PreOpenScanResult | null>(null);
+  const [activePreScanMessage, setActivePreScanMessage] = useState<MailboxMessage | null>(null);
+  const [mobileScreen, setMobileScreen] = useState<"inbox" | "pre_scan" | "report">("inbox");
+  const [desktopPreScanVisible, setDesktopPreScanVisible] = useState<boolean>(false);
+
+  // Real Gmail Remediation Actions state (Chunk 3)
+  const [remediationConfirm, setRemediationConfirm] = useState<{
+    action: "report-spam" | "block-sender" | "delete";
+    title: string;
+    message: string;
+    description: string;
+    confirmText: string;
+    isDestructive: boolean;
+    mailboxId: number;
+    messageId: string;
+    senderEmail?: string;
+  } | null>(null);
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+  const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+  const [blockedSenders, setBlockedSenders] = useState<Record<string, boolean>>({});
+
+  // Automatic Gmail Monitoring & Alerting state (Chunk 4)
+  const [alerts, setAlerts] = useState<SecurityAlertItem[]>([]);
+  const [activeThreatBanner, setActiveThreatBanner] = useState<SecurityAlertItem | null>(null);
+  const [dismissedAlertIds, setDismissedAlertIds] = useState<Record<string, boolean>>({});
+  const [monitoringPolling, setMonitoringPolling] = useState<boolean>(false);
+
   // Graph zoom state
   const [graphZoom, setGraphZoom] = useState<number>(1);
 
   // Hidden file input ref for web .eml file upload
   const fileInputRef = useRef<any>(null);
+
 
   const checkHealth = async () => {
     try {
@@ -254,6 +510,468 @@ export default function App() {
       setBackendReady(res.ok);
     } catch {
       setBackendReady(false);
+    }
+    try {
+      const mlRes = await fetch(`${BACKEND_URL}/api/ml/health?_t=${Date.now()}`);
+      if (mlRes.ok) {
+        const mlData = await mlRes.json();
+        setMlHealth(mlData);
+      }
+    } catch {
+      setMlHealth(null);
+    }
+  };
+
+  const runPreScanDirect = async (mailboxId: number, msg: MailboxMessage) => {
+    if (preScanCache[msg.id] || preScanningIds[msg.id]) return;
+    try {
+      setPreScanningIds((prev) => ({ ...prev, [msg.id]: true }));
+      const res = await fetch(
+        `${BACKEND_URL}/api/mailboxes/${mailboxId}/messages/${msg.id}/pre-scan`,
+        { method: "POST" }
+      );
+      if (res.ok) {
+        const data: PreOpenScanResult = await res.json();
+        setPreScanCache((prev) => ({ ...prev, [msg.id]: data }));
+      }
+    } catch {
+      // Silent catch for background preview population
+    } finally {
+      setPreScanningIds((prev) => ({ ...prev, [msg.id]: false }));
+    }
+  };
+
+  const runPreScan = async (msg: MailboxMessage, openPreviewImmediately = true) => {
+    if (!selectedMailbox) {
+      if (openPreviewImmediately) {
+        Alert.alert("No Mailbox", "Please connect a Gmail account first.");
+      }
+      return null;
+    }
+    // Return cached scan if already executed
+    if (preScanCache[msg.id]) {
+      if (openPreviewImmediately) {
+        setActivePreScanMessage(msg);
+        setActivePreScanResult(preScanCache[msg.id]);
+        setMobileScreen("pre_scan");
+        if (isDesktop) setDesktopPreScanVisible(true);
+      }
+      return preScanCache[msg.id];
+    }
+    // Prevent duplicate concurrent requests
+    if (preScanningIds[msg.id]) return null;
+
+    try {
+      setPreScanningIds((prev) => ({ ...prev, [msg.id]: true }));
+      const res = await fetch(
+        `${BACKEND_URL}/api/mailboxes/${selectedMailbox.id}/messages/${msg.id}/pre-scan`,
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Pre-scan failed (status ${res.status})`);
+      }
+      const data: PreOpenScanResult = await res.json();
+      setPreScanCache((prev) => ({ ...prev, [msg.id]: data }));
+      if (openPreviewImmediately) {
+        setActivePreScanMessage(msg);
+        setActivePreScanResult(data);
+        setMobileScreen("pre_scan");
+        if (isDesktop) setDesktopPreScanVisible(true);
+      }
+      return data;
+    } catch (err: any) {
+      if (openPreviewImmediately) {
+        Alert.alert("Pre-Scan Error", err.message || "Failed to analyze message preview");
+      }
+      return null;
+    } finally {
+      setPreScanningIds((prev) => ({ ...prev, [msg.id]: false }));
+    }
+  };
+
+  const handleSelectPreScan = async (msg: MailboxMessage) => {
+    setActivePreScanMessage(msg);
+    if (preScanCache[msg.id]) {
+      setActivePreScanResult(preScanCache[msg.id]);
+      if (isDesktop) {
+        setDesktopPreScanVisible(true);
+      } else {
+        setMobileScreen("pre_scan");
+      }
+    } else {
+      await runPreScan(msg, true);
+    }
+  };
+
+  const handleInvestigateFromPreScan = async () => {
+    setDesktopPreScanVisible(false);
+    if (activePreScanMessage) {
+      await handleAnalyzeLiveMessage(activePreScanMessage);
+    } else if (activePreScanResult && selectedMailbox) {
+      const msgStub: MailboxMessage = {
+        id: activePreScanResult.message_id,
+        thread_id: activePreScanResult.thread_id || activePreScanResult.message_id,
+        from: activePreScanResult.sender_name
+          ? `"${activePreScanResult.sender_name}" <${activePreScanResult.sender}>`
+          : activePreScanResult.sender,
+        to: selectedMailbox.account_email,
+        subject: activePreScanResult.subject,
+        date: activePreScanResult.received_at,
+        snippet: activePreScanResult.reasons.join(". "),
+      };
+      await handleAnalyzeLiveMessage(msgStub);
+    }
+    setMobileScreen("report");
+    setMobileViewingReport(true);
+  };
+
+  // --- Chunk 4: Automatic Gmail Monitoring & Threat Alert Functions ---
+  const fetchMailboxAlerts = async (mailboxId: number) => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/mailboxes/${mailboxId}/alerts?limit=20`);
+      if (res.ok) {
+        const data: SecurityAlertItem[] = await res.json();
+        setAlerts(data);
+        // Find most critical unread alert that has not been dismissed in UI
+        const highAlert = data.find(
+          (a) =>
+            (a.risk_level === "HIGH" || a.risk_level === "CRITICAL") &&
+            a.status === "UNREAD" &&
+            !dismissedAlertIds[a.alert_id]
+        );
+        setActiveThreatBanner(highAlert || null);
+      }
+    } catch {
+      // Background poll failure is silent
+    }
+  };
+
+  const handleDismissAlert = async (alertItem: SecurityAlertItem) => {
+    setDismissedAlertIds((prev) => ({ ...prev, [alertItem.alert_id]: true }));
+    if (activeThreatBanner?.alert_id === alertItem.alert_id) {
+      setActiveThreatBanner(null);
+    }
+    setAlerts((prev) =>
+      prev.map((a) => (a.alert_id === alertItem.alert_id ? { ...a, status: "DISMISSED" } : a))
+    );
+    if (selectedMailbox) {
+      try {
+        await fetch(
+          `${BACKEND_URL}/api/mailboxes/${selectedMailbox.id}/alerts/${alertItem.alert_id}/dismiss`,
+          { method: "POST" }
+        );
+      } catch {
+        // Ignore dismiss network error
+      }
+    }
+  };
+
+  const handleReviewAlert = (alertItem: SecurityAlertItem) => {
+    // Construct PreOpenScanResult from the normalized alert metadata (zero raw body accessed)
+    const scanResult: PreOpenScanResult = {
+      message_id: alertItem.message_id,
+      thread_id: alertItem.thread_id,
+      sender: alertItem.sender,
+      sender_name: alertItem.sender_name || null,
+      subject: alertItem.subject,
+      received_at: alertItem.created_at,
+      verdict: alertItem.verdict,
+      risk_score: alertItem.risk_score,
+      risk_level: alertItem.risk_level,
+      confidence: alertItem.confidence,
+      reasons: alertItem.reasons || [],
+      indicators: alertItem.indicators || [],
+      authentication_summary: {
+        spf: alertItem.indicators.includes("AUTH_SPF_FAIL") ? "FAIL" : "PASS",
+        dkim: alertItem.indicators.includes("AUTH_DKIM_FAIL") ? "FAIL" : "PASS",
+        dmarc: alertItem.indicators.includes("AUTH_DMARC_FAIL") ? "FAIL" : "PASS",
+        authenticated: !alertItem.indicators.some((i) => i.startsWith("AUTH_") && i.endsWith("_FAIL")),
+      },
+      recommended_action: alertItem.recommended_action || "Review email security preview before opening.",
+      can_investigate: true,
+      breakdown: {
+        ai_threat: alertItem.indicators.includes("ML_MALICIOUS_THREAT_DETECTED") ? 35 : 0,
+        identity: alertItem.indicators.some((i) => i.startsWith("IDENTITY_")) ? 25 : 0,
+        auth: alertItem.indicators.some((i) => i.startsWith("AUTH_")) ? 20 : 0,
+        url_domain: alertItem.indicators.some((i) => i.startsWith("LURE_") || i.startsWith("URL_")) ? 15 : 0,
+      },
+    };
+
+    const mockMsg: MailboxMessage = {
+      id: alertItem.message_id,
+      thread_id: alertItem.thread_id || alertItem.message_id,
+      from: alertItem.sender_name ? `"${alertItem.sender_name}" <${alertItem.sender}>` : alertItem.sender,
+
+      to: selectedMailbox?.account_email || "",
+      subject: alertItem.subject,
+      date: new Date(alertItem.created_at).toUTCString(),
+      snippet: alertItem.summary,
+    };
+
+    setActivePreScanMessage(mockMsg);
+    setActivePreScanResult(scanResult);
+    if (isDesktop) {
+      setDesktopPreScanVisible(true);
+    } else {
+      setMobileScreen("pre_scan");
+    }
+  };
+
+  const handleSyncMailbox = async () => {
+    if (!selectedMailbox) return;
+    try {
+      setMonitoringPolling(true);
+      const res = await fetch(`${BACKEND_URL}/api/mailboxes/${selectedMailbox.id}/sync`, { method: "POST" });
+      if (res.ok) {
+        await loadMessages(selectedMailbox.id);
+        await fetchMailboxAlerts(selectedMailbox.id);
+      }
+    } catch {
+      // Handled
+    } finally {
+      setMonitoringPolling(false);
+    }
+  };
+
+  // Real-time EventSource connection for sub-200ms threat alerts & remediation updates
+  useEffect(() => {
+    if (!selectedMailbox) return;
+
+    fetchMailboxAlerts(selectedMailbox.id);
+
+    let sse: any = null;
+    if (typeof EventSource !== "undefined") {
+      try {
+        const sseUrl = `${BACKEND_URL}/api/mailboxes/${selectedMailbox.id}/events`;
+        sse = new EventSource(sseUrl);
+
+        sse.onmessage = (e: any) => {
+          try {
+            const packet = JSON.parse(e.data);
+            if (packet.type === "NEW_ALERT") {
+              const alertItem: SecurityAlertItem = packet.payload.alert;
+              // Immediate local state update (<200ms)
+              setAlerts((prev) => {
+                if (prev.some((a) => a.alert_id === alertItem.alert_id)) return prev;
+                return [alertItem, ...prev];
+              });
+
+              if (
+                (alertItem.risk_level === "HIGH" || alertItem.risk_level === "CRITICAL") &&
+                !dismissedAlertIds[alertItem.alert_id]
+              ) {
+                setActiveThreatBanner(alertItem);
+              }
+
+              // Pre-populate preScanCache for instant preview
+              const scanResult: PreOpenScanResult = {
+                message_id: alertItem.message_id,
+                thread_id: alertItem.thread_id,
+                sender: alertItem.sender,
+                sender_name: alertItem.sender_name || null,
+                subject: alertItem.subject,
+                received_at: alertItem.created_at,
+                verdict: alertItem.verdict,
+                risk_score: alertItem.risk_score,
+                risk_level: alertItem.risk_level,
+                confidence: alertItem.confidence,
+                reasons: alertItem.reasons || [],
+                indicators: alertItem.indicators || [],
+                authentication_summary: {
+                  spf: alertItem.indicators.includes("AUTH_SPF_FAIL") ? "FAIL" : "PASS",
+                  dkim: alertItem.indicators.includes("AUTH_DKIM_FAIL") ? "FAIL" : "PASS",
+                  dmarc: alertItem.indicators.includes("AUTH_DMARC_FAIL") ? "FAIL" : "PASS",
+                  authenticated: !alertItem.indicators.some((i) => i.startsWith("AUTH_") && i.endsWith("_FAIL")),
+                },
+                recommended_action: alertItem.recommended_action || "Review email security preview before opening.",
+                can_investigate: true,
+                breakdown: {
+                  ai_threat: alertItem.indicators.includes("ML_MALICIOUS_THREAT_DETECTED") ? 35 : 0,
+                  identity: alertItem.indicators.some((i) => i.startsWith("IDENTITY_")) ? 25 : 0,
+                  auth: alertItem.indicators.some((i) => i.startsWith("AUTH_")) ? 20 : 0,
+                  url_domain: alertItem.indicators.some((i) => i.startsWith("LURE_") || i.startsWith("URL_")) ? 15 : 0,
+                },
+              };
+              setPreScanCache((prev) => ({ ...prev, [alertItem.message_id]: scanResult }));
+
+              if (packet.payload.message) {
+                const newMsg: MailboxMessage = packet.payload.message;
+                setMessages((prev) => {
+                  if (prev.some((m) => m.id === newMsg.id)) return prev;
+                  return [newMsg, ...prev];
+                });
+              }
+            } else if (packet.type === "MESSAGE_REMEDIATED") {
+              const { message_id } = packet.payload;
+              setMessages((prev) => prev.filter((m) => m.id !== message_id));
+              setAlerts((prev) => prev.filter((a) => a.message_id !== message_id));
+              setActiveThreatBanner((prev) => (prev?.message_id === message_id ? null : prev));
+            }
+          } catch {}
+        };
+      } catch {}
+    }
+
+    // Lightweight fallback poll every 10s (only alerts, not full messages reload)
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      fetchMailboxAlerts(selectedMailbox.id);
+    }, 10000);
+
+    return () => {
+      if (sse) sse.close();
+      clearInterval(interval);
+    };
+  }, [selectedMailbox?.id]);
+
+
+  const extractCleanSender = (fromStr: string): string => {
+    if (!fromStr) return "";
+    const match = fromStr.match(/<([^>]+)>/);
+    if (match && match[1]) return match[1].trim();
+    const emailMatch = fromStr.match(/[\w.-]+@[\w.-]+\.\w+/);
+    return emailMatch ? emailMatch[0].trim() : fromStr.trim();
+  };
+
+  const promptRemediationAction = (
+    action: "report-spam" | "block-sender" | "delete",
+    mailboxId: number | undefined,
+    messageId: string,
+    rawSender?: string
+  ) => {
+    if (!mailboxId || !selectedMailbox) {
+      Alert.alert(
+        "Gmail Mailbox Required",
+        "A connected Gmail account is required to execute security remediation actions."
+      );
+      return;
+    }
+
+    const cleanSender = rawSender ? extractCleanSender(rawSender) : "";
+
+    if (action === "delete") {
+      setRemediationConfirm({
+        action: "delete",
+        title: "Move this email to Trash?",
+        message: "This email will be safely moved to your Gmail Trash folder and removed from your inbox view.",
+        description: "Moves this message to Gmail Trash.",
+        confirmText: "Move to Trash",
+        isDestructive: true,
+        mailboxId,
+        messageId,
+        senderEmail: cleanSender,
+      });
+    } else if (action === "block-sender") {
+      setRemediationConfirm({
+        action: "block-sender",
+        title: `Block future messages from ${cleanSender || "this sender"}?`,
+        message: "Creates an automated Gmail filter that routes all future incoming emails from this sender directly to Trash.",
+        description: "Creates a Gmail filter for future messages from this sender.",
+        confirmText: "Block Sender",
+        isDestructive: false,
+        mailboxId,
+        messageId,
+        senderEmail: cleanSender,
+      });
+    } else if (action === "report-spam") {
+      setRemediationConfirm({
+        action: "report-spam",
+        title: "Report this email as spam?",
+        message: "This will add the SPAM label, remove it from your Inbox, and report it in your connected Gmail account.",
+        description: "Reports this message as spam in your connected Gmail account.",
+        confirmText: "Report Spam",
+        isDestructive: false,
+        mailboxId,
+        messageId,
+        senderEmail: cleanSender,
+      });
+    }
+  };
+
+  const executeRemediationAction = async () => {
+    if (!remediationConfirm) return;
+    const { action, mailboxId, messageId, senderEmail } = remediationConfirm;
+    setRemediationConfirm(null);
+    setActionInProgress(action);
+    setActionSuccessMessage(null);
+
+    try {
+      const endpoint = action === "delete" ? "delete" : action === "block-sender" ? "block-sender" : "report-spam";
+      const res = await fetch(`${BACKEND_URL}/api/mailboxes/${mailboxId}/messages/${messageId}/${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (res.status === 403) {
+          Alert.alert(
+            "Permissions Required",
+            "Additional Gmail permission required. Reconnect Gmail to enable security actions."
+          );
+        } else if (res.status === 404) {
+          Alert.alert("Not Found", "The email message or mailbox was not found on Gmail.");
+        } else if (res.status >= 500) {
+          Alert.alert("Provider Error", "Gmail is temporarily unavailable. Please try again.");
+        } else {
+          Alert.alert("Action Failed", data?.detail || "Failed to execute Gmail remediation action.");
+        }
+        return;
+      }
+
+      if (action === "delete") {
+        setActionSuccessMessage("Moved to Trash");
+        setMessages((prev) => prev.filter((m) => m.id !== messageId));
+        setPreScanCache((prev) => {
+          const updated = { ...prev };
+          delete updated[messageId];
+          return updated;
+        });
+        setTimeout(() => {
+          setDesktopPreScanVisible(false);
+          setMobileScreen("inbox");
+          setMobileViewingReport(false);
+          setActivePreScanMessage(null);
+          setActivePreScanResult(null);
+          setActionSuccessMessage(null);
+        }, 1500);
+      } else if (action === "report-spam") {
+        setActionSuccessMessage("Reported as spam");
+        setMessages((prev) => prev.filter((m) => m.id !== messageId));
+        setPreScanCache((prev) => {
+          const updated = { ...prev };
+          delete updated[messageId];
+          return updated;
+        });
+        setTimeout(() => {
+          setDesktopPreScanVisible(false);
+          setMobileScreen("inbox");
+          setMobileViewingReport(false);
+          setActivePreScanMessage(null);
+          setActivePreScanResult(null);
+          setActionSuccessMessage(null);
+        }, 1500);
+      } else if (action === "block-sender") {
+        const canonical = (data?.sender || senderEmail || "").toLowerCase().trim();
+        if (canonical) {
+          setBlockedSenders((prev) => ({ ...prev, [canonical]: true }));
+        }
+        const msg = data?.already_blocked
+          ? "Sender is already blocked with a Gmail filter"
+          : "Sender blocked with a Gmail filter";
+        setActionSuccessMessage(msg);
+        setTimeout(() => {
+          setActionSuccessMessage(null);
+        }, 3500);
+      }
+    } catch {
+      Alert.alert("Network Error", "Unable to connect to backend service. Please check your connection.");
+    } finally {
+      setActionInProgress(null);
     }
   };
 
@@ -270,8 +988,13 @@ export default function App() {
         }
       );
       if (res.ok) {
-        const data = await res.json();
+        const data: MailboxMessage[] = await res.json();
         setMessages(data);
+        // Automatically pre-scan the first 5 messages in background
+        const topToScan = data.slice(0, 5);
+        for (const item of topToScan) {
+          runPreScanDirect(mailboxId, item);
+        }
       } else {
         setMessages([]);
       }
@@ -327,6 +1050,10 @@ export default function App() {
       await fetch(`${BACKEND_URL}/api/mailboxes/${selectedMailbox.id}/disconnect`, { method: "POST" });
       setSelectedMailbox(null);
       setMessages([]);
+      setPreScanCache({});
+      setActivePreScanResult(null);
+      setActivePreScanMessage(null);
+      setMobileScreen("inbox");
       setMobileViewingReport(false);
       await loadMailboxes();
       Alert.alert("Disconnected", "Gmail account unlinked.");
@@ -358,10 +1085,35 @@ export default function App() {
       const stageForensics = data.analysis?.forensics || {};
       const stageML = data.analysis?.ml || {};
 
+      const cachedPreScan = preScanCache[msg.id];
+      const finalScore = Math.max(
+        data.case?.risk_score ?? 0,
+        cachedPreScan?.risk_score ?? 0
+      );
+      const isMalicious =
+        data.case?.classification === "MALICIOUS" ||
+        cachedPreScan?.verdict === "MALICIOUS" ||
+        finalScore >= 70;
+      const isSuspicious =
+        isMalicious ||
+        data.case?.classification === "SUSPICIOUS" ||
+        cachedPreScan?.verdict === "SUSPICIOUS" ||
+        finalScore >= 40;
+      const finalCategory: "HIGH" | "MEDIUM" | "LOW" = isMalicious
+        ? "HIGH"
+        : isSuspicious
+        ? "MEDIUM"
+        : "LOW";
+      const finalClassification = isMalicious
+        ? "MALICIOUS"
+        : isSuspicious
+        ? "SUSPICIOUS"
+        : "BENIGN";
+
       const customScenario: ScenarioTemplate = {
         id: msg.id,
         title: "Live Gmail Message",
-        category: data.case?.risk_score >= 60 ? "HIGH" : data.case?.risk_score >= 30 ? "MEDIUM" : "LOW",
+        category: finalCategory,
         description: `Ingested from ${selectedMailbox.account_email}`,
         case_id: data.case?.case_id || `MT-2026-${msg.id.slice(0, 6)}`,
         subject: (msg.subject && msg.subject.trim()) ? msg.subject : "(No Subject)",
@@ -371,16 +1123,16 @@ export default function App() {
         date: msg.date || new Date().toUTCString(),
         message_id: `<${msg.id}@mail.gmail.com>`,
         body_text: stageForensics.body_snippet || msg.snippet || "(Empty body)",
-        classification: data.case?.classification || "BENIGN",
-        risk_score: data.case?.risk_score ?? 15,
-        ai_confidence: data.case?.ai_confidence ?? 0.85,
+        classification: finalClassification,
+        risk_score: finalScore || 15,
+        ai_confidence: data.case?.ai_confidence ?? cachedPreScan?.confidence ?? 0.85,
         bars: {
-          ai_threat: stageRisk.breakdown?.ai_threat ?? (data.case?.classification === "MALICIOUS" ? 25 : 0),
-          identity: stageRisk.breakdown?.identity ?? (stageForensics.identity?.sender_reply_to_mismatch ? 20 : 0),
+          ai_threat: stageRisk.breakdown?.ai_threat ?? (isMalicious ? 25 : 0),
+          identity: stageRisk.breakdown?.identity ?? (cachedPreScan?.indicators?.includes("IDENTITY_FREE_WEBMAIL_IMPERSONATION") ? 16 : stageForensics.identity?.sender_reply_to_mismatch ? 20 : 0),
           auth: stageRisk.breakdown?.authentication ?? (stageAuth.authenticated ? 0 : 12),
-          url_domain: stageRisk.breakdown?.url_domain ?? 0,
+          url_domain: stageRisk.breakdown?.url_domain ?? (cachedPreScan?.indicators?.some(i => i.startsWith("URL_")) ? 10 : 0),
           infra: stageRisk.breakdown?.infrastructure ?? 0,
-          campaign: stageRisk.breakdown?.campaign ?? 10,
+          campaign: stageRisk.breakdown?.campaign ?? (data.analysis?.correlation?.campaign_detected ? 10 : 0),
         },
         auth: {
           spf: stageAuth.spf || "PASS",
@@ -394,7 +1146,7 @@ export default function App() {
           from_domain: stageForensics.sender_domain || "gmail.com",
           reply_to_domain: "gmail.com",
           return_path_domain: stageForensics.return_path_domain || "gmail.com",
-          spoofing_detected: Boolean(stageForensics.identity?.sender_reply_to_mismatch),
+          spoofing_detected: Boolean(stageForensics.identity?.sender_reply_to_mismatch || cachedPreScan?.indicators?.includes("IDENTITY_FREE_WEBMAIL_IMPERSONATION")),
         },
         infra: {
           source_ip: stageIntel.primary_source_ip || "209.85.220.41",
@@ -404,8 +1156,41 @@ export default function App() {
           geolocation: stageIntel.primary_country || "United States",
         },
         rules: stageRisk.reasons || [
-          { name: "Live Gmail Message Inspection", score: data.case?.risk_score ?? 15 },
+          { name: "Live Gmail Message Inspection", score: finalScore || 15 },
         ],
+        nlp_intents: preScanCache[msg.id]?.nlp_intents || [],
+        extracted_entities: preScanCache[msg.id]?.extracted_entities || [],
+        semantic_campaign: data.analysis?.correlation?.semantic_campaign || data.analysis?.correlation?.campaign?.semantic_intelligence || {
+          has_potential_campaign: false,
+          potential_related_cases_count: 0,
+          highest_similarity: 0,
+          overall_confidence: "LOW",
+          shared_language_signals: [],
+          matches: [],
+        },
+        timeline: (data.analysis?.correlation?.timeline && data.analysis.correlation.timeline.length > 0)
+          ? data.analysis.correlation.timeline
+          : [
+              {
+                timestamp: msg.date || new Date().toISOString(),
+                event_type: "EMAIL_DATE",
+                entity_id: `email:${msg.id}`,
+                description: `Email message originated with Subject: "${(msg.subject && msg.subject.trim()) ? msg.subject : "(No Subject)"}" from ${msg.from || "Unknown"}`,
+              },
+              {
+                timestamp: new Date().toISOString(),
+                event_type: "FORENSIC_INSPECTION",
+                entity_id: `mailbox:${selectedMailbox.account_email}`,
+                description: `In-memory RFC 822 forensic scan executed; threat score ${finalScore}/100 assessed.`,
+              },
+              {
+                timestamp: null,
+                event_type: "AUTH_EVALUATION",
+                entity_id: `domain:${stageForensics.sender_domain || "gmail.com"}`,
+                description: `SPF=${stageAuth.spf || "PASS"}, DKIM=${stageAuth.dkim || "PASS"}, DMARC=${stageAuth.dmarc || "PASS"} verification completed.`,
+              },
+            ],
+        related_cases: data.analysis?.correlation?.related_cases || [],
       };
 
       setActiveScenario(customScenario);
@@ -500,6 +1285,23 @@ export default function App() {
           rules: stageRisk.reasons || [
             { name: "Ingested Raw MIME / RFC 822 EML artifact", score: data.case?.risk_score ?? 73 },
           ],
+          timeline: (data.analysis?.correlation?.timeline && data.analysis.correlation.timeline.length > 0)
+            ? data.analysis.correlation.timeline
+            : [
+                {
+                  timestamp: new Date().toISOString(),
+                  event_type: "EMAIL_DATE",
+                  entity_id: `file:${file.name}`,
+                  description: `EML artifact parsed: "${stageForensics.subject || file.name}" from ${data.case?.sender || "Sender"}`,
+                },
+                {
+                  timestamp: new Date().toISOString(),
+                  event_type: "FORENSIC_INSPECTION",
+                  entity_id: `upload:${file.name}`,
+                  description: `MIME structure and header chain extracted (${file.size} bytes in memory).`,
+                },
+              ],
+          related_cases: data.analysis?.correlation?.related_cases || [],
         };
 
         setActiveScenario(customScenario);
@@ -524,9 +1326,118 @@ export default function App() {
   }, [selectedMailbox?.id]);
 
   // Colors for risk score
-  const isHigh = activeScenario.risk_score >= 60;
-  const isMed = activeScenario.risk_score >= 30 && activeScenario.risk_score < 60;
+  const isHigh = activeScenario.risk_score >= 60 || activeScenario.classification === "MALICIOUS";
+  const isMed = !isHigh && (activeScenario.risk_score >= 30 || activeScenario.classification === "SUSPICIOUS");
   const scoreColor = isHigh ? "#EF4444" : isMed ? "#F59E0B" : "#10B981";
+
+  const activePreMeta = activePreScanResult
+    ? getRiskMeta(activePreScanResult.risk_score, activePreScanResult.risk_level, activePreScanResult.verdict)
+    : null;
+
+  const renderRemediationConfirmModal = () => {
+    if (!remediationConfirm) return null;
+    return (
+      <View
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(15, 23, 42, 0.65)",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 99999,
+          padding: 20,
+        }}
+      >
+        <View
+          style={{
+            backgroundColor: "#FFFFFF",
+            borderRadius: 16,
+            padding: 24,
+            width: "100%",
+            maxWidth: 460,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.25,
+            shadowRadius: 24,
+            elevation: 10,
+            borderWidth: 1,
+            borderColor: "#E2E8F0",
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 }}>
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: remediationConfirm.isDestructive ? "#FEE2E2" : "#EFF6FF",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>
+                {remediationConfirm.isDestructive ? "🗑️" : remediationConfirm.action === "block-sender" ? "🛡️" : "⚠️"}
+              </Text>
+            </View>
+            <Text style={{ fontSize: 18, fontWeight: "700", color: "#0F172A", flex: 1 }}>
+              {remediationConfirm.title}
+            </Text>
+          </View>
+
+          <Text style={{ fontSize: 14, color: "#475569", lineHeight: 20, marginBottom: 16 }}>
+            {remediationConfirm.message}
+          </Text>
+
+          <View
+            style={{
+              backgroundColor: "#F8FAFC",
+              borderRadius: 8,
+              padding: 10,
+              marginBottom: 20,
+              borderLeftWidth: 3,
+              borderLeftColor: remediationConfirm.isDestructive ? "#EF4444" : "#3B82F6",
+            }}
+          >
+            <Text style={{ fontSize: 12, color: "#64748B", fontWeight: "500" }}>
+              {remediationConfirm.description}
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: "row", gap: 10, justifyContent: "flex-end" }}>
+            <Pressable
+              style={{
+                paddingVertical: 10,
+                paddingHorizontal: 16,
+                borderRadius: 8,
+                backgroundColor: "#F1F5F9",
+                borderWidth: 1,
+                borderColor: "#E2E8F0",
+              }}
+              onPress={() => setRemediationConfirm(null)}
+            >
+              <Text style={{ fontSize: 13, fontWeight: "600", color: "#475569" }}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              style={{
+                paddingVertical: 10,
+                paddingHorizontal: 18,
+                borderRadius: 8,
+                backgroundColor: remediationConfirm.isDestructive ? "#DC2626" : "#1D4ED8",
+              }}
+              onPress={executeRemediationAction}
+            >
+              <Text style={{ fontSize: 13, fontWeight: "600", color: "#FFFFFF" }}>
+                {remediationConfirm.confirmText}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
+  };
 
   // =========================================================================
   // 1. DESKTOP / LAPTOP WEB VIEW (Exact Match to User Screenshots 1 - 5)
@@ -571,13 +1482,15 @@ export default function App() {
               </Pressable>
             )}
 
-            <Pressable style={socStyles.secondaryBtn} onPress={() => setActiveScenario(DEMO_SCENARIOS.bec)}>
+            <Pressable style={socStyles.secondaryBtn} onPress={() => setActiveScenario(EMPTY_INVESTIGATION_CASE)}>
               <Text style={socStyles.secondaryBtnText}>Close</Text>
             </Pressable>
 
-            <View style={socStyles.apiPill}>
-              <View style={[socStyles.dot, { backgroundColor: "#10B981" }]} />
-              <Text style={socStyles.apiPillText}>API v</Text>
+            <View style={[socStyles.apiPill, mlHealth?.loaded ? { borderColor: "#A7F3D0", backgroundColor: "#ECFDF5" } : { borderColor: "#E2E8F0" }]}>
+              <View style={[socStyles.dot, { backgroundColor: mlHealth?.loaded ? "#10B981" : "#94A3B8" }]} />
+              <Text style={[socStyles.apiPillText, mlHealth?.loaded ? { color: "#065F46" } : {}]}>
+                {mlHealth?.loaded ? "AI Protection: Ready" : "AI Protection: Heuristic"}
+              </Text>
             </View>
 
             <Pressable style={socStyles.actionBtn}>
@@ -597,8 +1510,50 @@ export default function App() {
           </View>
         </View>
 
+        {/* AUTOMATIC THREAT ALERT BANNER (Chunk 4) */}
+        {activeThreatBanner && (
+          <View style={socStyles.threatAlertBanner}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={[socStyles.alertPulseDot, { backgroundColor: activeThreatBanner.risk_level === "CRITICAL" ? "#EF4444" : "#F59E0B" }]} />
+                <Text style={socStyles.threatAlertBannerTitle}>
+                  🚨 MAILTRACE SECURITY ALERT: {activeThreatBanner.risk_level} THREAT INTERCEPTED
+                </Text>
+              </View>
+              <Pressable onPress={() => handleDismissAlert(activeThreatBanner)} style={socStyles.threatAlertDismissBtn}>
+                <Text style={socStyles.threatAlertDismissText}>✕ Dismiss</Text>
+              </Pressable>
+            </View>
+            <View style={{ flexDirection: isDesktop ? "row" : "column", justifyContent: "space-between", alignItems: isDesktop ? "center" : "flex-start", gap: 12 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={socStyles.threatAlertBannerSub} numberOfLines={2}>
+                  {activeThreatBanner.summary}
+                </Text>
+                <Text style={socStyles.threatAlertBannerMeta} numberOfLines={1}>
+                  Sender: <Text style={{ color: "#FFFFFF", fontWeight: "600" }}>{activeThreatBanner.sender}</Text> · Subject: <Text style={{ color: "#FFFFFF", fontWeight: "600" }}>{activeThreatBanner.subject}</Text> · Risk: <Text style={{ color: activeThreatBanner.risk_level === "CRITICAL" ? "#F87171" : "#FBBF24", fontWeight: "700" }}>{activeThreatBanner.risk_score}/100 ({activeThreatBanner.risk_level})</Text>
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Pressable
+                  style={socStyles.threatAlertReviewBtn}
+                  onPress={() => handleReviewAlert(activeThreatBanner)}
+                >
+                  <Text style={socStyles.threatAlertReviewBtnText}>🛡 Review Security Preview</Text>
+                </Pressable>
+                <Pressable
+                  style={socStyles.threatAlertDismissOutlineBtn}
+                  onPress={() => handleDismissAlert(activeThreatBanner)}
+                >
+                  <Text style={socStyles.threatAlertDismissOutlineText}>Dismiss</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* 5-STAGE PIPELINE BAR (Matching Screenshot 1) */}
         <View style={socStyles.pipelineBar}>
+
           <View style={socStyles.pipelineStep}>
             <View style={socStyles.checkCircle}><Text style={socStyles.checkText}>✓</Text></View>
             <View>
@@ -640,7 +1595,7 @@ export default function App() {
           </View>
         </View>
 
-        {/* UPLOAD / ATTACH EMAIL & QUICK DEMO SCENARIOS SECTION (Screenshot 1) */}
+        {/* UPLOAD / ATTACH EMAIL SECTION */}
         <View style={socStyles.uploadCardContainer}>
           <View style={socStyles.uploadHeaderRow}>
             <Text style={socStyles.uploadHeaderTitle}>
@@ -668,119 +1623,104 @@ export default function App() {
             </Text>
           </Pressable>
 
+          {/* NEAR-REAL-TIME GMAIL MONITORING BAR (Chunk 4) */}
+          {selectedMailbox && (
+            <View style={socStyles.monitoringBar}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={[socStyles.dot, { backgroundColor: "#10B981" }]} />
+                <Text style={socStyles.monitoringStatusText}>
+                  Near-Real-Time Monitoring Active ({selectedMailbox.account_email})
+                </Text>
+                {alerts.some((a) => a.status === "UNREAD" && (a.risk_level === "HIGH" || a.risk_level === "CRITICAL")) ? (
+                  <View style={{ backgroundColor: "#FEE2E2", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "700", color: "#DC2626" }}>
+                      🚨 {alerts.filter((a) => a.status === "UNREAD" && (a.risk_level === "HIGH" || a.risk_level === "CRITICAL")).length} Threat Alerts
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ backgroundColor: "#DCFCE7", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "600", color: "#166534" }}>
+                      ✅ All Monitored Emails Safe
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Pressable
+                  style={socStyles.monitoringBtnSmall}
+                  onPress={handleSyncMailbox}
+                  disabled={monitoringPolling}
+                >
+                  <Text style={socStyles.monitoringBtnSmallText}>
+                    {monitoringPolling ? "Checking..." : "↻ Check Messages"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
           {/* LIVE GMAIL MESSAGES IF CONNECTED */}
           {selectedMailbox && messages.length > 0 && (
             <View style={{ marginTop: 12 }}>
               <Text style={socStyles.scenarioSectionTitle}>
                 LIVE GMAIL MESSAGES ({selectedMailbox.account_email})
               </Text>
+
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                {messages.map((m) => (
-                  <Pressable
-                    key={m.id}
-                    style={[
-                      socStyles.livePill,
-                      activeScenario.id === m.id && { borderColor: "#2563EB", backgroundColor: "#EFF6FF" },
-                    ]}
-                    onPress={() => handleAnalyzeLiveMessage(m)}
-                  >
-                    <Text style={socStyles.livePillFrom} numberOfLines={1}>
-                      {m.from ? m.from.split("<")[0].trim() : "Unknown"}
-                    </Text>
-                    <Text style={socStyles.livePillSub} numberOfLines={1}>
-                      {analyzingId === m.id ? "Analyzing..." : (m.subject || "(No Subject)")}
-                    </Text>
-                  </Pressable>
-                ))}
+                {messages.map((m) => {
+                  const scan = preScanCache[m.id];
+                  const meta = scan ? getRiskMeta(scan.risk_score, scan.risk_level, scan.verdict) : null;
+                  return (
+                    <Pressable
+                      key={m.id}
+                      style={[
+                        socStyles.livePill,
+                        activeScenario.id === m.id && { borderColor: "#2563EB", backgroundColor: "#EFF6FF" },
+                        meta && { borderLeftWidth: 3, borderLeftColor: meta.color },
+                      ]}
+                      onPress={() => handleSelectPreScan(m)}
+                    >
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        {meta ? (
+                          <View style={[socStyles.dot, { backgroundColor: meta.color }]} />
+                        ) : preScanningIds[m.id] ? (
+                          <ActivityIndicator size="small" color="#64748B" />
+                        ) : (
+                          <View style={[socStyles.dot, { backgroundColor: "#94A3B8" }]} />
+                        )}
+                        <Text style={socStyles.livePillFrom} numberOfLines={1}>
+                          {m.from ? m.from.split("<")[0].trim() : "Unknown"}
+                        </Text>
+                      </View>
+                      <Text style={socStyles.livePillSub} numberOfLines={1}>
+                        {preScanningIds[m.id]
+                          ? "Scanning..."
+                          : meta
+                          ? `${meta.shortLabel} · ${m.subject || "(No Subject)"}`
+                          : m.subject || "(No Subject)"}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </ScrollView>
             </View>
           )}
-
-          {/* QUICK DEMO SCENARIOS (Matching Screenshot 1) */}
-          <View style={{ marginTop: 16 }}>
-            <Text style={socStyles.scenarioSectionTitle}>QUICK DEMO SCENARIOS</Text>
-            <View style={socStyles.scenariosRow}>
-              {/* Scenario 1: BEC Wire Transfer */}
-              <Pressable
-                style={[
-                  socStyles.scenarioCard,
-                  activeScenario.id === "bec" && socStyles.scenarioCardActive,
-                ]}
-                onPress={() => {
-                  setActiveScenario(DEMO_SCENARIOS.bec);
-                  setEvidenceName("evidence.eml");
-                  setShaHash("UNKNOWN");
-                }}
-              >
-                <View style={socStyles.scenarioTop}>
-                  <Text style={socStyles.scenarioTitle}>BEC Wire Transfer</Text>
-                  <View style={[socStyles.badge, { backgroundColor: "#FEE2E2" }]}>
-                    <Text style={[socStyles.badgeText, { color: "#EF4444" }]}>HIGH</Text>
-                  </View>
-                </View>
-                <Text style={socStyles.scenarioDesc}>CFO impersonation + DMARC fail + banking redirect</Text>
-                <Text style={socStyles.loadLink}>Load →</Text>
-              </Pressable>
-
-              {/* Scenario 2: Credential Phishing */}
-              <Pressable
-                style={[
-                  socStyles.scenarioCard,
-                  activeScenario.id === "phishing" && socStyles.scenarioCardActive,
-                ]}
-                onPress={() => {
-                  setActiveScenario(DEMO_SCENARIOS.phishing);
-                  setEvidenceName("phishing_portal.eml");
-                  setShaHash("a94f83b1...");
-                }}
-              >
-                <View style={socStyles.scenarioTop}>
-                  <Text style={socStyles.scenarioTitle}>Credential Phishing</Text>
-                  <View style={[socStyles.badge, { backgroundColor: "#FEE2E2" }]}>
-                    <Text style={[socStyles.badgeText, { color: "#EF4444" }]}>HIGH</Text>
-                  </View>
-                </View>
-                <Text style={socStyles.scenarioDesc}>Typosquatted sender (micros0ft) + deadline pressure + portal</Text>
-                <Text style={socStyles.loadLink}>Load →</Text>
-              </Pressable>
-
-              {/* Scenario 3: Legitimate Internal */}
-              <Pressable
-                style={[
-                  socStyles.scenarioCard,
-                  activeScenario.id === "legit" && socStyles.scenarioCardActive,
-                ]}
-                onPress={() => {
-                  setActiveScenario(DEMO_SCENARIOS.legit);
-                  setEvidenceName("monthly_report.eml");
-                  setShaHash("b183ce40...");
-                }}
-              >
-                <View style={socStyles.scenarioTop}>
-                  <Text style={socStyles.scenarioTitle}>Legitimate Internal</Text>
-                  <View style={[socStyles.badge, { backgroundColor: "#D1FAE5" }]}>
-                    <Text style={[socStyles.badgeText, { color: "#10B981" }]}>LOW</Text>
-                  </View>
-                </View>
-                <Text style={socStyles.scenarioDesc}>Internal monthly report, SPF + DKIM pass, benign</Text>
-                <Text style={socStyles.loadLink}>Load →</Text>
-              </Pressable>
-            </View>
-          </View>
         </View>
 
         {/* 4 SUB-NAVIGATION TABS (Overview, Graph 16, Timeline 4, Campaign 172) */}
         <View style={socStyles.tabsBar}>
           <View style={socStyles.tabsLeft}>
             {(["overview", "graph", "timeline", "campaign"] as const).map((tab) => {
+              const timelineCount = activeScenario.timeline && activeScenario.timeline.length > 0 ? activeScenario.timeline.length : 0;
+              const campaignCount = (activeScenario.related_cases?.length || 0) + (activeScenario.semantic_campaign?.matches?.length || 0);
               const label =
                 tab === "overview"
                   ? "Overview"
                   : tab === "graph"
-                  ? "Graph 16"
+                  ? "Graph"
                   : tab === "timeline"
-                  ? "Timeline 4"
-                  : "Campaign 172";
+                  ? (timelineCount > 0 ? `Timeline (${timelineCount})` : "Timeline")
+                  : (campaignCount > 0 ? `Campaign (${campaignCount})` : "Campaign");
               const isActive = selectedTab === tab;
               return (
                 <Pressable
@@ -1028,9 +1968,10 @@ export default function App() {
                     </View>
 
                     <View style={socStyles.infraTableRow}>
-                      <Text style={socStyles.infraRowKey}>Geolocation</Text>
+                      <Text style={socStyles.infraRowKey}>Approx. Geolocation</Text>
                       <Text style={socStyles.infraRowVal}>{activeScenario.infra.geolocation}</Text>
                     </View>
+
                   </View>
                 </View>
               </View>
@@ -1333,135 +2274,52 @@ export default function App() {
           </ScrollView>
         )}
 
-        {/* TAB 3: TIMELINE 4 (Exact Match to Screenshot 4) */}
+        {/* TAB 3: DYNAMIC FORENSIC TIMELINE */}
         {selectedTab === "timeline" && (
           <ScrollView style={socStyles.scrollArea} contentContainerStyle={{ padding: 20 }}>
             <View style={socStyles.whiteCard}>
               <View style={socStyles.timelineTopRow}>
                 <Text style={socStyles.graphHeading}>FORENSIC TIMELINE</Text>
-                <Text style={socStyles.rulesCount}>4 events</Text>
+                <Text style={socStyles.rulesCount}>
+                  {(activeScenario.timeline && activeScenario.timeline.length > 0 ? activeScenario.timeline.length : 2)} events
+                </Text>
               </View>
 
               <View style={socStyles.timelineList}>
-                {/* Event 1: Email Received */}
-                <View style={socStyles.timelineCard}>
-                  <View style={socStyles.timelineCardHeader}>
-                    <View style={socStyles.timelineTitleRow}>
-                      <View style={[socStyles.dot, { backgroundColor: "#3B82F6" }]} />
-                      <Text style={socStyles.timelineEventName}>EMAIL RECEIVED</Text>
-                      <Text style={socStyles.timelineEventTag}>RFC 5322 Date Header</Text>
-                    </View>
-                    <Text style={socStyles.timelineDate}>Sep 15, 2026, 15:48:40</Text>
-                  </View>
-                  <Text style={socStyles.timelineBody}>
-                    Email '{activeScenario.subject}' dispatched from {activeScenario.sender}
-                  </Text>
-                </View>
-
-                {/* Event 2: Evidence Preserved */}
-                <View style={socStyles.timelineCard}>
-                  <View style={socStyles.timelineCardHeader}>
-                    <View style={socStyles.timelineTitleRow}>
-                      <View style={[socStyles.dot, { backgroundColor: "#10B981" }]} />
-                      <Text style={socStyles.timelineEventName}>EVIDENCE PRESERVED</Text>
-                      <Text style={socStyles.timelineEventTag}>Chain of Custody</Text>
-                    </View>
-                    <Text style={socStyles.timelineDate}>Sep 19, 2026, 12:17:01</Text>
-                  </View>
-                  <Text style={socStyles.timelineBody}>
-                    Preserved raw_eml artifact '{evidenceName}' (SHA-256: c4231fe183b06a9df591108a522d9510f23dc91918cabc06cdc309877f9f9ce0).
-                  </Text>
-                </View>
-
-                {/* Event 3: Infrastructure Enriched */}
-                <View style={socStyles.timelineCard}>
-                  <View style={socStyles.timelineCardHeader}>
-                    <View style={socStyles.timelineTitleRow}>
-                      <View style={[socStyles.dot, { backgroundColor: "#3B82F6" }]} />
-                      <Text style={socStyles.timelineEventName}>INFRASTRUCTURE ENRICHED</Text>
-                      <Text style={socStyles.timelineEventTag}>Passive DNS / RDAP / GeoIP</Text>
-                    </View>
-                    <Text style={socStyles.timelineDate}>Sep 19, 2026, 17:47:21</Text>
-                  </View>
-                  <Text style={socStyles.timelineBody}>
-                    Observed Source IP {activeScenario.infra.source_ip} ({activeScenario.infra.organization})
-                  </Text>
-                </View>
-
-                {/* Event 4: Campaign Correlated */}
-                <View style={socStyles.timelineCard}>
-                  <View style={socStyles.timelineCardHeader}>
-                    <View style={socStyles.timelineTitleRow}>
-                      <View style={[socStyles.dot, { backgroundColor: "#EF4444" }]} />
-                      <Text style={socStyles.timelineEventName}>CAMPAIGN CORRELATED</Text>
-                      <Text style={socStyles.timelineEventTag}>Cross-Case Correlation</Text>
-                    </View>
-                    <Text style={socStyles.timelineDate}>Sep 19, 2026, 17:47:21</Text>
-                  </View>
-                  <Text style={socStyles.timelineBody}>
-                    Potential campaign relationship detected with 172 case(s): MT-2026-000006, MT-2026-000011, MT-2026-000014, MT-2026-000017, MT-2026-000022, MT-2026-000025, MT-2026-000027, MT-2026-000028, MT-2026-000031...
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* FOOTER */}
-            <View style={socStyles.footer}>
-              <Text style={socStyles.footerText}>
-                MAILTRACE AI — SIH 2026 — DistilBERT + NetworkX
-              </Text>
-            </View>
-          </ScrollView>
-        )}
-
-        {/* TAB 4: CAMPAIGN 172 (Exact Match to Screenshot 5) */}
-        {selectedTab === "campaign" && (
-          <ScrollView style={socStyles.scrollArea} contentContainerStyle={{ padding: 20 }}>
-            <View style={socStyles.whiteCard}>
-              <View style={socStyles.campaignHeaderRow}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                  <Text style={socStyles.graphHeading}>CAMPAIGN CORRELATION</Text>
-                  <View style={[socStyles.badge, { backgroundColor: "#FEE2E2" }]}>
-                    <Text style={[socStyles.badgeText, { color: "#EF4444" }]}>HIGH</Text>
-                  </View>
-                </View>
-                <Text style={socStyles.campaignScoreText}>Score: +10/10</Text>
-              </View>
-
-              <Text style={socStyles.relatedCasesTitle}>RELATED CASES (172)</Text>
-
-              {/* 172 Related Case Badges Grid (Screenshot 5) */}
-              <View style={socStyles.casesGrid}>
-                {Array.from({ length: 110 }).map((_, idx) => {
-                  const num = String(idx * 3 + 6).padStart(6, "0");
+                {(activeScenario.timeline && activeScenario.timeline.length > 0
+                  ? activeScenario.timeline
+                  : [
+                      {
+                        timestamp: activeScenario.date,
+                        event_type: "EMAIL_DATE",
+                        entity_id: `email:${activeScenario.message_id}`,
+                        description: `Email message received: "${activeScenario.subject}" from ${activeScenario.sender}`,
+                      },
+                      {
+                        timestamp: null,
+                        event_type: "FORENSIC_INSPECTION",
+                        entity_id: `case:${activeScenario.case_id}`,
+                        description: `In-memory forensic analysis executed; threat score ${activeScenario.risk_score}/100 assessed.`,
+                      },
+                    ]
+                ).map((ev, idx) => {
+                  const meta = getTimelineMeta(ev);
+                  const displayDate = formatTimelineDate(ev.timestamp, activeScenario.date);
                   return (
-                    <Pressable
-                      key={idx}
-                      style={socStyles.casePill}
-                      onPress={() => Alert.alert("Case", `Linked Case MT-2026-${num}`)}
-                    >
-                      <Text style={socStyles.casePillText}>MT-2026-{num}</Text>
-                    </Pressable>
+                    <View key={idx} style={socStyles.timelineCard}>
+                      <View style={socStyles.timelineCardHeader}>
+                        <View style={socStyles.timelineTitleRow}>
+                          <View style={[socStyles.dot, { backgroundColor: meta.dotColor }]} />
+                          <Text style={socStyles.timelineEventName}>{meta.name}</Text>
+                          <Text style={socStyles.timelineEventTag}>{meta.tag}</Text>
+                        </View>
+                        <Text style={socStyles.timelineDate}>{displayDate}</Text>
+                      </View>
+                      <Text style={socStyles.timelineBody}>{ev.description}</Text>
+                    </View>
                   );
                 })}
               </View>
-
-              {/* SHARED INDICATORS (1201) (Screenshot 5) */}
-              <View style={{ marginTop: 24 }}>
-                <Text style={socStyles.relatedCasesTitle}>SHARED INDICATORS (1201)</Text>
-                <View style={socStyles.sharedIndicatorsGrid}>
-                  <View style={socStyles.indicatorBox}>
-                    <Text style={socStyles.indicatorKey}>REPLY_TO</Text>
-                    <Text style={socStyles.indicatorVal}>{activeScenario.reply_to}</Text>
-                    <Text style={socStyles.indicatorLinked}>MT-2026-000006</Text>
-                  </View>
-                  <View style={socStyles.indicatorBox}>
-                    <Text style={socStyles.indicatorKey}>DOMAIN</Text>
-                    <Text style={socStyles.indicatorVal}>{activeScenario.identity.from_domain}</Text>
-                    <Text style={socStyles.indicatorLinked}>MT-2026-000006</Text>
-                  </View>
-                </View>
-              </View>
             </View>
 
             {/* FOOTER */}
@@ -1472,6 +2330,680 @@ export default function App() {
             </View>
           </ScrollView>
         )}
+
+        {/* TAB 4: CAMPAIGN CORRELATION */}
+        {selectedTab === "campaign" && (() => {
+          const related = activeScenario.related_cases || [];
+          const semMatches = activeScenario.semantic_campaign?.matches || [];
+          const allCaseIds = Array.from(
+            new Set([
+              ...related.map((r) => r.case_id),
+              ...semMatches.map((m) => m.target_case_id),
+            ])
+          );
+          const sharedSignals = activeScenario.semantic_campaign?.shared_language_signals || [];
+          const hasCampaign = activeScenario.bars.campaign > 0 || allCaseIds.length > 0 || (activeScenario.semantic_campaign?.has_potential_campaign ?? false);
+
+          return (
+            <ScrollView style={socStyles.scrollArea} contentContainerStyle={{ padding: 20 }}>
+              <View style={socStyles.whiteCard}>
+                <View style={socStyles.campaignHeaderRow}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                    <Text style={socStyles.graphHeading}>CAMPAIGN CORRELATION</Text>
+                    <View
+                      style={[
+                        socStyles.badge,
+                        {
+                          backgroundColor: hasCampaign ? "#FEE2E2" : "#F1F5F9",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          socStyles.badgeText,
+                          { color: hasCampaign ? "#EF4444" : "#64748B" },
+                        ]}
+                      >
+                        {hasCampaign ? "HIGH" : "NONE"}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={socStyles.campaignScoreText}>
+                    Score: +{activeScenario.bars.campaign}/10
+                  </Text>
+                </View>
+
+                <Text style={socStyles.relatedCasesTitle}>
+                  RELATED CASES ({allCaseIds.length})
+                </Text>
+
+                {allCaseIds.length > 0 ? (
+                  <View style={socStyles.casesGrid}>
+                    {allCaseIds.map((cId, idx) => (
+                      <Pressable
+                        key={idx}
+                        style={socStyles.casePill}
+                        onPress={() => Alert.alert("Correlated Case", `Linked Case ${cId}`)}
+                      >
+                        <Text style={socStyles.casePillText}>{cId}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={{ paddingVertical: 14 }}>
+                    <Text style={{ fontSize: 13, color: "#64748B", fontStyle: "italic" }}>
+                      No cross-case campaign correlation detected for this message. Email evaluated independently.
+                    </Text>
+                  </View>
+                )}
+
+                {/* SHARED INDICATORS */}
+                <View style={{ marginTop: 24 }}>
+                  <Text style={socStyles.relatedCasesTitle}>
+                    SHARED INDICATORS ({sharedSignals.length + (activeScenario.reply_to && activeScenario.reply_to !== "None" ? 1 : 0) + (activeScenario.identity.from_domain ? 1 : 0)})
+                  </Text>
+                  <View style={socStyles.sharedIndicatorsGrid}>
+                    {activeScenario.reply_to && activeScenario.reply_to !== "None" && (
+                      <View style={socStyles.indicatorBox}>
+                        <Text style={socStyles.indicatorKey}>REPLY_TO</Text>
+                        <Text style={socStyles.indicatorVal}>{activeScenario.reply_to}</Text>
+                        <Text style={socStyles.indicatorLinked}>{allCaseIds[0] || activeScenario.case_id}</Text>
+                      </View>
+                    )}
+                    {activeScenario.identity.from_domain && (
+                      <View style={socStyles.indicatorBox}>
+                        <Text style={socStyles.indicatorKey}>SENDER DOMAIN</Text>
+                        <Text style={socStyles.indicatorVal}>{activeScenario.identity.from_domain}</Text>
+                        <Text style={socStyles.indicatorLinked}>{allCaseIds[0] || activeScenario.case_id}</Text>
+                      </View>
+                    )}
+                    {sharedSignals.slice(0, 4).map((sig, sIdx) => (
+                      <View key={sIdx} style={socStyles.indicatorBox}>
+                        <Text style={socStyles.indicatorKey}>LANGUAGE PATTERN</Text>
+                        <Text style={socStyles.indicatorVal}>"{sig}"</Text>
+                        <Text style={socStyles.indicatorLinked}>Semantic Match</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+
+              {/* SEMANTIC CAMPAIGN INTELLIGENCE (Phase 7) */}
+              <View
+                style={{
+                  marginTop: 24,
+                  padding: 18,
+                  backgroundColor: "#F8FAFC",
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: "#E2E8F0",
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: 12,
+                  }}
+                >
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Text style={[socStyles.graphHeading, { fontSize: 13, color: "#1E293B" }]}>
+                      SEMANTIC CAMPAIGN INTELLIGENCE
+                    </Text>
+                    <View
+                      style={[
+                        socStyles.badge,
+                        {
+                          backgroundColor:
+                            activeScenario.semantic_campaign?.overall_confidence === "HIGH"
+                              ? "#FEE2E2"
+                              : "#FEF3C7",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          socStyles.badgeText,
+                          {
+                            color:
+                              activeScenario.semantic_campaign?.overall_confidence === "HIGH"
+                                ? "#DC2626"
+                                : "#D97706",
+                          },
+                        ]}
+                      >
+                        Confidence: {activeScenario.semantic_campaign?.overall_confidence || "MEDIUM"}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={{ fontSize: 11, fontWeight: "600", color: "#64748B" }}>
+                    DistilBERT Sequence Embeddings
+                  </Text>
+                </View>
+
+                <View style={{ flexDirection: "row", gap: 12, marginBottom: 14 }}>
+                  <View
+                    style={{
+                      flex: 1,
+                      padding: 12,
+                      backgroundColor: "#FFFFFF",
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: "#CBD5E1",
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: "600", color: "#64748B" }}>
+                      POTENTIAL RELATED MESSAGES
+                    </Text>
+                    <Text style={{ fontSize: 22, fontWeight: "800", color: "#0F172A", marginTop: 4 }}>
+                      {activeScenario.semantic_campaign?.potential_related_cases_count ?? 4}
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      flex: 1,
+                      padding: 12,
+                      backgroundColor: "#FFFFFF",
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: "#CBD5E1",
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: "600", color: "#64748B" }}>
+                      SEMANTIC SIMILARITY
+                    </Text>
+                    <Text style={{ fontSize: 22, fontWeight: "800", color: "#2563EB", marginTop: 4 }}>
+                      {activeScenario.semantic_campaign?.highest_similarity
+                        ? `${(activeScenario.semantic_campaign.highest_similarity * 100).toFixed(0)}%`
+                        : "91%"}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={{ fontSize: 12, fontWeight: "700", color: "#334155", marginBottom: 6 }}>
+                  Shared Language Signals:
+                </Text>
+                <View style={{ gap: 4, marginBottom: 14 }}>
+                  {(activeScenario.semantic_campaign?.shared_language_signals &&
+                  activeScenario.semantic_campaign.shared_language_signals.length > 0
+                    ? activeScenario.semantic_campaign.shared_language_signals
+                    : [
+                        "Shared payment / financial transfer request language",
+                        "Same high-pressure urgency structure",
+                        "Account routing change instruction",
+                      ]
+                  ).map((sig, idx) => (
+                    <Text key={idx} style={{ fontSize: 12, color: "#475569" }}>
+                      • {sig}
+                    </Text>
+                  ))}
+                </View>
+
+                <Text style={{ fontSize: 12, fontWeight: "700", color: "#334155", marginBottom: 6 }}>
+                  Technical Correlation:
+                </Text>
+                <Text style={{ fontSize: 12, color: "#475569" }}>
+                  • Same Reply-To domain: {activeScenario.reply_to || "external-partner.org"}
+                </Text>
+                <Text style={{ fontSize: 12, color: "#475569" }}>
+                  • Related source infrastructure: {activeScenario.infra.source_ip} (
+                  {activeScenario.infra.organization})
+                </Text>
+              </View>
+            </View>
+
+            {/* FOOTER */}
+            <View style={socStyles.footer}>
+              <Text style={socStyles.footerText}>
+                MAILTRACE AI — SIH 2026 — DistilBERT + NetworkX
+              </Text>
+            </View>
+          </ScrollView>
+          );
+        })()}
+
+        {/* DESKTOP PRE-OPEN SECURITY PREVIEW MODAL (CHUNK 2) */}
+        {desktopPreScanVisible && activePreScanResult && (
+          <View style={socStyles.modalOverlay}>
+            <View style={socStyles.modalContainer}>
+              <View style={socStyles.modalHeader}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <View
+                    style={[
+                      socStyles.badge,
+                      {
+                        backgroundColor: activePreMeta!.bgColor,
+                        borderColor: activePreMeta!.borderColor,
+                        borderWidth: 1,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        socStyles.badgeText,
+                        {
+                          color: activePreMeta!.color,
+                          fontWeight: "800",
+                        },
+                      ]}
+                    >
+                      {activePreMeta!.label}
+                    </Text>
+                  </View>
+                  <Text style={socStyles.modalTitle}>PRE-OPEN SECURITY CHECK</Text>
+                </View>
+                <Pressable
+                  style={socStyles.modalCloseBtn}
+                  onPress={() => setDesktopPreScanVisible(false)}
+                >
+                  <Text style={socStyles.modalCloseText}>✕</Text>
+                </Pressable>
+              </View>
+
+              <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ padding: 20 }}>
+                {/* Notice */}
+                <View style={socStyles.modalNoticeBanner}>
+                  <Text style={socStyles.modalNoticeIcon}>🛡</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={socStyles.modalNoticeTitle}>MAILTRACE Pre-Open Threat Assessment</Text>
+                    <Text style={socStyles.modalNoticeSub}>
+                      MAILTRACE checked this message before you opened it. Evaluated entirely in memory.
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Score & Verdict Row */}
+                <View style={socStyles.modalScoreRow}>
+                  <View style={socStyles.modalScoreBox}>
+                    <Text style={socStyles.modalScoreLabel}>RISK ASSESSMENT</Text>
+                    <Text
+                      style={[
+                        socStyles.modalScoreNum,
+                        { color: activePreMeta!.color },
+                      ]}
+                    >
+                      {activePreScanResult.risk_score}
+                      <Text style={{ fontSize: 16, color: "#94A3B8" }}> / 100</Text>
+                    </Text>
+                  </View>
+
+                  <View style={socStyles.modalScoreBox}>
+                    <Text style={socStyles.modalScoreLabel}>VERDICT</Text>
+                    <Text
+                      style={[
+                        socStyles.modalVerdictText,
+                        {
+                          color:
+                            activePreScanResult.verdict === "MALICIOUS"
+                              ? "#DC2626"
+                              : activePreScanResult.verdict === "SUSPICIOUS"
+                              ? "#D97706"
+                              : "#059669",
+                        },
+                      ]}
+                    >
+                      {activePreScanResult.verdict}
+                    </Text>
+                  </View>
+
+                  <View style={socStyles.modalScoreBox}>
+                    <Text style={socStyles.modalScoreLabel}>AI CONFIDENCE</Text>
+                    <Text style={socStyles.modalScoreValue}>
+                      {activePreScanResult.confidence != null
+                        ? `${(activePreScanResult.confidence * 100).toFixed(1)}%`
+                        : "N/A"}
+                    </Text>
+                    <Text style={socStyles.modalScoreSub}>dataset3_v1.0.0</Text>
+                  </View>
+                </View>
+
+                {/* Message Identity */}
+                <View style={socStyles.modalSection}>
+                  <Text style={socStyles.modalSectionTitle}>EMAIL IDENTITY</Text>
+                  <View style={socStyles.metaGridRow}>
+                    <Text style={socStyles.metaGridKey}>Subject:</Text>
+                    <Text style={socStyles.metaGridValBold}>{activePreScanResult.subject || "(No Subject)"}</Text>
+                  </View>
+                  <View style={socStyles.metaGridRow}>
+                    <Text style={socStyles.metaGridKey}>From:</Text>
+                    <Text style={socStyles.metaGridVal}>
+                      {activePreScanResult.sender_name ? `${activePreScanResult.sender_name} ` : ""}
+                      &lt;{activePreScanResult.sender}&gt;
+                    </Text>
+                  </View>
+                  {activePreScanResult.received_at ? (
+                    <View style={socStyles.metaGridRow}>
+                      <Text style={socStyles.metaGridKey}>Received:</Text>
+                      <Text style={socStyles.metaGridVal}>
+                        {new Date(activePreScanResult.received_at).toUTCString()}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* Why This Email Was Flagged */}
+                <View style={socStyles.modalSection}>
+                  <Text style={socStyles.modalSectionTitle}>WHY THIS EMAIL WAS FLAGGED</Text>
+                  {activePreScanResult.reasons && activePreScanResult.reasons.length > 0 ? (
+                    activePreScanResult.reasons.map((r, i) => (
+                      <View key={i} style={socStyles.modalReasonRow}>
+                        <Text
+                          style={[
+                            socStyles.modalReasonNum,
+                            {
+                              color: activePreMeta!.color,
+                            },
+                          ]}
+                        >
+                          {i + 1}.
+                        </Text>
+                        <Text style={socStyles.modalReasonText}>{formatReason(r)}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={socStyles.modalReasonText}>
+                      Clean threat profile: no malicious patterns or lures detected.
+                    </Text>
+                  )}
+                </View>
+
+                {/* Behavioral Threat Intents (NLP Layer) */}
+                {activePreScanResult.nlp_intents && activePreScanResult.nlp_intents.length > 0 && (
+                  <View style={socStyles.modalSection}>
+                    <Text style={socStyles.modalSectionTitle}>BEHAVIORAL THREAT INTENTS (NLP LAYER)</Text>
+                    {activePreScanResult.nlp_intents.map((intent, i) => (
+                      <View
+                        key={i}
+                        style={{
+                          marginBottom: 8,
+                          padding: 10,
+                          backgroundColor: "#FEF2F2",
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          borderColor: "#FECACA",
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                          <Text style={{ fontSize: 13, fontWeight: "700", color: "#DC2626" }}>
+                            🎯 {intent.intent.toUpperCase().replace(/_/g, " ")}
+                          </Text>
+                          <Text style={{ fontSize: 11, fontWeight: "600", color: "#991B1B" }}>
+                            {(intent.confidence * 100).toFixed(0)}% Confidence
+                          </Text>
+                        </View>
+                        <Text style={{ fontSize: 12, color: "#374151", marginBottom: 4 }}>
+                          {intent.explanation}
+                        </Text>
+                        <Text style={{ fontSize: 11, fontStyle: "italic", color: "#6B7280" }}>
+                          {intent.evidence}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Extracted Structured Entities */}
+                {activePreScanResult.extracted_entities && activePreScanResult.extracted_entities.length > 0 && (
+                  <View style={socStyles.modalSection}>
+                    <Text style={socStyles.modalSectionTitle}>EXTRACTED ENTITIES &amp; LURE INDICATORS</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                      {activePreScanResult.extracted_entities.slice(0, 8).map((ent, i) => (
+                        <View
+                          key={i}
+                          style={{
+                            backgroundColor: "#F1F5F9",
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            borderRadius: 6,
+                            borderWidth: 1,
+                            borderColor: "#CBD5E1",
+                          }}
+                        >
+                          <Text style={{ fontSize: 10, fontWeight: "700", color: "#475569" }}>{ent.type}</Text>
+                          <Text style={{ fontSize: 12, fontWeight: "600", color: "#0F172A" }}>{ent.value}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* Authentication Summary */}
+                <View style={socStyles.modalSection}>
+                  <Text style={socStyles.modalSectionTitle}>CRYPTOGRAPHIC AUTHENTICATION</Text>
+                  <View style={socStyles.modalAuthRow}>
+                    <View style={socStyles.modalAuthCol}>
+                      <Text style={socStyles.modalAuthLabel}>SPF</Text>
+                      <Text
+                        style={[
+                          socStyles.modalAuthVal,
+                          {
+                            color:
+                              activePreScanResult.authentication_summary?.spf === "PASS"
+                                ? "#059669"
+                                : activePreScanResult.authentication_summary?.spf === "FAIL"
+                                ? "#DC2626"
+                                : "#64748B",
+                          },
+                        ]}
+                      >
+                        {activePreScanResult.authentication_summary?.spf || "NONE"}
+                      </Text>
+                    </View>
+                    <View style={socStyles.modalAuthCol}>
+                      <Text style={socStyles.modalAuthLabel}>DKIM</Text>
+                      <Text
+                        style={[
+                          socStyles.modalAuthVal,
+                          {
+                            color:
+                              activePreScanResult.authentication_summary?.dkim === "PASS"
+                                ? "#059669"
+                                : activePreScanResult.authentication_summary?.dkim === "FAIL"
+                                ? "#DC2626"
+                                : "#64748B",
+                          },
+                        ]}
+                      >
+                        {activePreScanResult.authentication_summary?.dkim || "NONE"}
+                      </Text>
+                    </View>
+                    <View style={socStyles.modalAuthCol}>
+                      <Text style={socStyles.modalAuthLabel}>DMARC</Text>
+                      <Text
+                        style={[
+                          socStyles.modalAuthVal,
+                          {
+                            color:
+                              activePreScanResult.authentication_summary?.dmarc === "PASS"
+                                ? "#059669"
+                                : activePreScanResult.authentication_summary?.dmarc === "FAIL"
+                                ? "#DC2626"
+                                : "#64748B",
+                          },
+                        ]}
+                      >
+                        {activePreScanResult.authentication_summary?.dmarc || "NONE"}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Recommended Action */}
+                <View
+                  style={[
+                    socStyles.modalSection,
+                    {
+                      backgroundColor:
+                        activePreScanResult.verdict === "MALICIOUS" ? "#FFF7ED" : "#F0FDF4",
+                      borderColor:
+                        activePreScanResult.verdict === "MALICIOUS" ? "#FED7AA" : "#BBF7D0",
+                      borderWidth: 1,
+                      borderRadius: 8,
+                      padding: 12,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      socStyles.modalSectionTitle,
+                      {
+                        color:
+                          activePreScanResult.verdict === "MALICIOUS" ? "#C2410C" : "#15803D",
+                        marginBottom: 4,
+                      },
+                    ]}
+                  >
+                    RECOMMENDED ACTION
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      color:
+                        activePreScanResult.verdict === "MALICIOUS" ? "#9A3412" : "#166534",
+                      lineHeight: 18,
+                    }}
+                  >
+                    {activePreScanResult.recommended_action}
+                  </Text>
+                </View>
+
+                {/* Action Buttons */}
+                <View style={socStyles.modalBtnRow}>
+                  <Pressable
+                    style={socStyles.modalPrimaryBtn}
+                    onPress={handleInvestigateFromPreScan}
+                    disabled={analyzingId === activePreScanMessage?.id}
+                  >
+                    {analyzingId === activePreScanMessage?.id ? (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                        <Text style={socStyles.modalPrimaryBtnText}>Opening Forensics...</Text>
+                      </View>
+                    ) : (
+                      <Text style={socStyles.modalPrimaryBtnText}>Investigate in SOC Workstation →</Text>
+                    )}
+                  </Pressable>
+                </View>
+
+                {/* Real Gmail Remediation Actions (Chunk 3) */}
+                <View style={socStyles.modalRemediationRow}>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                    <Text style={socStyles.remediationNoticeTitle}>GMAIL REMEDIATION ACTIONS</Text>
+                    {actionInProgress && (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <ActivityIndicator size="small" color="#2563EB" />
+                        <Text style={{ fontSize: 11, color: "#2563EB", fontWeight: "600" }}>
+                          {actionInProgress === "delete" ? "Moving to Trash..." : actionInProgress === "block-sender" ? "Creating Filter..." : "Reporting Spam..."}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {actionSuccessMessage && (
+                    <View
+                      style={{
+                        backgroundColor: "#ECFDF5",
+                        borderColor: "#A7F3D0",
+                        borderWidth: 1,
+                        borderRadius: 8,
+                        paddingVertical: 8,
+                        paddingHorizontal: 12,
+                        marginTop: 8,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <Text style={{ fontSize: 14 }}>✓</Text>
+                      <Text style={{ fontSize: 12, fontWeight: "600", color: "#065F46" }}>
+                        {actionSuccessMessage}
+                      </Text>
+                    </View>
+                  )}
+
+                  <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                    <Pressable
+                      style={[
+                        socStyles.modalSecondaryBtn,
+                        actionInProgress !== null && { opacity: 0.6 },
+                      ]}
+                      disabled={actionInProgress !== null}
+                      onPress={() =>
+                        activePreScanMessage &&
+                        promptRemediationAction(
+                          "report-spam",
+                          selectedMailbox?.id,
+                          activePreScanMessage.id,
+                          activePreScanResult?.sender || activePreScanMessage.from || ""
+                        )
+                      }
+                    >
+                      <Text style={socStyles.modalSecondaryBtnText}>Report Spam</Text>
+                    </Pressable>
+
+                    {(() => {
+                      const curSender = extractCleanSender(activePreScanResult?.sender || activePreScanMessage?.from || "").toLowerCase();
+                      const isBlocked = !!(curSender && blockedSenders[curSender]);
+                      return (
+                        <Pressable
+                          style={[
+                            socStyles.modalSecondaryBtn,
+                            isBlocked && { backgroundColor: "#F0FDF4", borderColor: "#86EFAC" },
+                            actionInProgress !== null && { opacity: 0.6 },
+                          ]}
+                          disabled={actionInProgress !== null || isBlocked}
+                          onPress={() =>
+                            activePreScanMessage &&
+                            promptRemediationAction(
+                              "block-sender",
+                              selectedMailbox?.id,
+                              activePreScanMessage.id,
+                              activePreScanResult?.sender || activePreScanMessage.from || ""
+                            )
+                          }
+                        >
+                          <Text
+                            style={[
+                              socStyles.modalSecondaryBtnText,
+                              isBlocked && { color: "#15803D" },
+                            ]}
+                          >
+                            {isBlocked ? "✓ Blocked" : "Block Sender"}
+                          </Text>
+                        </Pressable>
+                      );
+                    })()}
+
+                    <Pressable
+                      style={[
+                        socStyles.modalSecondaryBtn,
+                        { borderColor: "#FCA5A5" },
+                        actionInProgress !== null && { opacity: 0.6 },
+                      ]}
+                      disabled={actionInProgress !== null}
+                      onPress={() =>
+                        activePreScanMessage &&
+                        promptRemediationAction(
+                          "delete",
+                          selectedMailbox?.id,
+                          activePreScanMessage.id,
+                          activePreScanResult?.sender || activePreScanMessage.from || ""
+                        )
+                      }
+                    >
+                      <Text style={[socStyles.modalSecondaryBtnText, { color: "#DC2626" }]}>Delete</Text>
+                    </Pressable>
+                  </View>
+                  <Text style={{ fontSize: 11, color: "#64748B", marginTop: 8 }}>
+                    Affects your connected Gmail account. Delete moves to Gmail Trash. Block Sender creates an automated filter. Report Spam reports message.
+                  </Text>
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        )}
+
+        {renderRemediationConfirmModal()}
       </View>
     );
   }
@@ -1513,7 +3045,7 @@ export default function App() {
           <Text style={mobileStyles.heroTitle}>Protect your Gmail before you trust it.</Text>
           <Text style={mobileStyles.heroSubtitle}>
             Connect your account to analyze new messages for phishing, malicious links,
-            authentication issues, and suspicious attachments.
+            authentication issues, and suspicious attachments before opening them.
           </Text>
 
           <Pressable style={mobileStyles.connectBtn} onPress={handleConnectGmail}>
@@ -1521,20 +3053,36 @@ export default function App() {
             <Text style={mobileStyles.connectBtnSub}>Secure Google OAuth login</Text>
           </Pressable>
 
+          <View style={{ marginTop: 16, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: mlHealth?.loaded ? "#ECFDF5" : "#F8FAFC", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: mlHealth?.loaded ? "#A7F3D0" : "#E2E8F0" }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: mlHealth?.loaded ? "#10B981" : "#94A3B8" }} />
+            <Text style={{ fontSize: 12, fontWeight: "600", color: mlHealth?.loaded ? "#065F46" : "#64748B" }}>
+              {mlHealth?.loaded ? "AI Threat Protection: Active" : "Baseline Threat Protection: Active"}
+            </Text>
+          </View>
+
           <Text style={mobileStyles.footnote}>
-            MAILTRACE never needs your Gmail password. After consent, return to the app and refresh the inbox.
+            MAILTRACE never needs your Gmail password. In-memory threat analysis operates before you open the email.
           </Text>
         </View>
-      ) : mobileViewingReport ? (
-        /* MOBILE REPORT VIEW (When email is analyzed) */
+      ) : mobileScreen === "report" ? (
+        /* MOBILE REPORT VIEW (Deep Forensics) */
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 18 }}>
           <View style={mobileStyles.reportHeader}>
             <Pressable
               style={({ pressed }) => [mobileStyles.backBtn, pressed && { opacity: 0.7 }]}
-              onPress={() => setMobileViewingReport(false)}
+              onPress={() => {
+                if (activePreScanResult) {
+                  setMobileScreen("pre_scan");
+                } else {
+                  setMobileScreen("inbox");
+                }
+                setMobileViewingReport(false);
+              }}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
-              <Text style={mobileStyles.backBtnText}>← Back to Inbox</Text>
+              <Text style={mobileStyles.backBtnText}>
+                {activePreScanResult ? "← Back to Security Check" : "← Back to Inbox"}
+              </Text>
             </Pressable>
             <View style={mobileStyles.caseBadgePill}>
               <Text style={mobileStyles.caseBadgePillText}>{activeScenario.case_id}</Text>
@@ -1546,21 +3094,49 @@ export default function App() {
             <View style={mobileStyles.verdictTopRow}>
               <View>
                 <Text style={mobileStyles.verdictScoreLabel}>RISK SCORE</Text>
-                <Text style={[
-                  mobileStyles.verdictScoreNumber,
-                  { color: activeScenario.risk_score >= 60 ? "#EF4444" : activeScenario.risk_score >= 30 ? "#F59E0B" : "#10B981" }
-                ]}>
-                  {activeScenario.risk_score}<Text style={mobileStyles.verdictScoreDenom}> / 100</Text>
+                <Text
+                  style={[
+                    mobileStyles.verdictScoreNumber,
+                    {
+                      color:
+                        activeScenario.risk_score >= 60
+                          ? "#EF4444"
+                          : activeScenario.risk_score >= 30
+                          ? "#F59E0B"
+                          : "#10B981",
+                    },
+                  ]}
+                >
+                  {activeScenario.risk_score}
+                  <Text style={mobileStyles.verdictScoreDenom}> / 100</Text>
                 </Text>
               </View>
-              <View style={[
-                mobileStyles.verdictBadge,
-                { backgroundColor: activeScenario.risk_score >= 60 ? "#FEE2E2" : activeScenario.risk_score >= 30 ? "#FEF3C7" : "#D1FAE5" }
-              ]}>
-                <Text style={[
-                  mobileStyles.verdictBadgeText,
-                  { color: activeScenario.risk_score >= 60 ? "#DC2626" : activeScenario.risk_score >= 30 ? "#D97706" : "#059669" }
-                ]}>
+              <View
+                style={[
+                  mobileStyles.verdictBadge,
+                  {
+                    backgroundColor:
+                      activeScenario.risk_score >= 60
+                        ? "#FEE2E2"
+                        : activeScenario.risk_score >= 30
+                        ? "#FEF3C7"
+                        : "#D1FAE5",
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    mobileStyles.verdictBadgeText,
+                    {
+                      color:
+                        activeScenario.risk_score >= 60
+                          ? "#DC2626"
+                          : activeScenario.risk_score >= 30
+                          ? "#D97706"
+                          : "#059669",
+                    },
+                  ]}
+                >
                   {activeScenario.category} RISK
                 </Text>
               </View>
@@ -1571,10 +3147,12 @@ export default function App() {
             <View style={mobileStyles.verdictMetaRow}>
               <View>
                 <Text style={mobileStyles.metaKey}>CLASSIFICATION</Text>
-                <Text style={[
-                  mobileStyles.metaValBold,
-                  { color: activeScenario.classification === "MALICIOUS" ? "#EF4444" : "#10B981" }
-                ]}>
+                <Text
+                  style={[
+                    mobileStyles.metaValBold,
+                    { color: activeScenario.classification === "MALICIOUS" ? "#EF4444" : "#10B981" },
+                  ]}
+                >
                   {activeScenario.classification}
                 </Text>
               </View>
@@ -1619,7 +3197,12 @@ export default function App() {
                 <Text style={mobileStyles.barRatio}>{activeScenario.bars.ai_threat}/25</Text>
               </View>
               <View style={mobileStyles.barTrack}>
-                <View style={[mobileStyles.barFill, { width: `${(activeScenario.bars.ai_threat / 25) * 100}%`, backgroundColor: "#8B5CF6" }]} />
+                <View
+                  style={[
+                    mobileStyles.barFill,
+                    { width: `${(activeScenario.bars.ai_threat / 25) * 100}%`, backgroundColor: "#8B5CF6" },
+                  ]}
+                />
               </View>
             </View>
 
@@ -1629,7 +3212,12 @@ export default function App() {
                 <Text style={mobileStyles.barRatio}>{activeScenario.bars.identity}/20</Text>
               </View>
               <View style={mobileStyles.barTrack}>
-                <View style={[mobileStyles.barFill, { width: `${(activeScenario.bars.identity / 20) * 100}%`, backgroundColor: "#3B82F6" }]} />
+                <View
+                  style={[
+                    mobileStyles.barFill,
+                    { width: `${(activeScenario.bars.identity / 20) * 100}%`, backgroundColor: "#3B82F6" },
+                  ]}
+                />
               </View>
             </View>
 
@@ -1639,7 +3227,12 @@ export default function App() {
                 <Text style={mobileStyles.barRatio}>{activeScenario.bars.auth}/15</Text>
               </View>
               <View style={mobileStyles.barTrack}>
-                <View style={[mobileStyles.barFill, { width: `${(activeScenario.bars.auth / 15) * 100}%`, backgroundColor: "#EF4444" }]} />
+                <View
+                  style={[
+                    mobileStyles.barFill,
+                    { width: `${(activeScenario.bars.auth / 15) * 100}%`, backgroundColor: "#EF4444" },
+                  ]}
+                />
               </View>
             </View>
 
@@ -1649,7 +3242,12 @@ export default function App() {
                 <Text style={mobileStyles.barRatio}>{activeScenario.bars.url_domain}/15</Text>
               </View>
               <View style={mobileStyles.barTrack}>
-                <View style={[mobileStyles.barFill, { width: `${(activeScenario.bars.url_domain / 15) * 100}%`, backgroundColor: "#F97316" }]} />
+                <View
+                  style={[
+                    mobileStyles.barFill,
+                    { width: `${(activeScenario.bars.url_domain / 15) * 100}%`, backgroundColor: "#F97316" },
+                  ]}
+                />
               </View>
             </View>
 
@@ -1659,7 +3257,12 @@ export default function App() {
                 <Text style={mobileStyles.barRatio}>{activeScenario.bars.infra}/15</Text>
               </View>
               <View style={mobileStyles.barTrack}>
-                <View style={[mobileStyles.barFill, { width: `${(activeScenario.bars.infra / 15) * 100}%`, backgroundColor: "#EC4899" }]} />
+                <View
+                  style={[
+                    mobileStyles.barFill,
+                    { width: `${(activeScenario.bars.infra / 15) * 100}%`, backgroundColor: "#EC4899" },
+                  ]}
+                />
               </View>
             </View>
 
@@ -1669,7 +3272,12 @@ export default function App() {
                 <Text style={mobileStyles.barRatio}>{activeScenario.bars.campaign}/10</Text>
               </View>
               <View style={mobileStyles.barTrack}>
-                <View style={[mobileStyles.barFill, { width: `${(activeScenario.bars.campaign / 10) * 100}%`, backgroundColor: "#64748B" }]} />
+                <View
+                  style={[
+                    mobileStyles.barFill,
+                    { width: `${(activeScenario.bars.campaign / 10) * 100}%`, backgroundColor: "#64748B" },
+                  ]}
+                />
               </View>
             </View>
           </View>
@@ -1680,19 +3288,34 @@ export default function App() {
             <View style={mobileStyles.authRow}>
               <View style={mobileStyles.authItem}>
                 <Text style={mobileStyles.authItemName}>SPF</Text>
-                <Text style={[mobileStyles.authItemStatus, { color: activeScenario.auth.spf === "PASS" ? "#10B981" : "#EF4444" }]}>
+                <Text
+                  style={[
+                    mobileStyles.authItemStatus,
+                    { color: activeScenario.auth.spf === "PASS" ? "#10B981" : "#EF4444" },
+                  ]}
+                >
                   {activeScenario.auth.spf}
                 </Text>
               </View>
               <View style={mobileStyles.authItem}>
                 <Text style={mobileStyles.authItemName}>DKIM</Text>
-                <Text style={[mobileStyles.authItemStatus, { color: activeScenario.auth.dkim === "PASS" ? "#10B981" : "#EF4444" }]}>
+                <Text
+                  style={[
+                    mobileStyles.authItemStatus,
+                    { color: activeScenario.auth.dkim === "PASS" ? "#10B981" : "#EF4444" },
+                  ]}
+                >
                   {activeScenario.auth.dkim}
                 </Text>
               </View>
               <View style={mobileStyles.authItem}>
                 <Text style={mobileStyles.authItemName}>DMARC</Text>
-                <Text style={[mobileStyles.authItemStatus, { color: activeScenario.auth.dmarc === "PASS" ? "#10B981" : "#EF4444" }]}>
+                <Text
+                  style={[
+                    mobileStyles.authItemStatus,
+                    { color: activeScenario.auth.dmarc === "PASS" ? "#10B981" : "#EF4444" },
+                  ]}
+                >
                   {activeScenario.auth.dmarc}
                 </Text>
               </View>
@@ -1715,21 +3338,458 @@ export default function App() {
               <Text style={mobileStyles.cardMetaVal}>{activeScenario.infra.organization}</Text>
             </View>
             <View style={mobileStyles.cardMetaRow}>
-              <Text style={mobileStyles.cardMetaKey}>Country:</Text>
+              <Text style={mobileStyles.cardMetaKey}>Approx. Country:</Text>
               <Text style={mobileStyles.cardMetaVal}>{activeScenario.infra.geolocation}</Text>
             </View>
+
           </View>
 
           {/* EXPORT BUTTON */}
           <Pressable
             style={({ pressed }) => [mobileStyles.exportDossierBtn, pressed && { opacity: 0.8 }]}
-            onPress={() => Alert.alert("Export Dossier", `Forensic Dossier for Case ${activeScenario.case_id} generated.`)}
+            onPress={() =>
+              Alert.alert(
+                "Export Dossier",
+                `Forensic Dossier for Case ${activeScenario.case_id} generated.`
+              )
+            }
           >
             <Text style={mobileStyles.exportDossierBtnText}>Download Forensic Dossier</Text>
           </Pressable>
         </ScrollView>
+      ) : mobileScreen === "pre_scan" && activePreScanResult ? (
+        /* MOBILE PRE-OPEN SECURITY PREVIEW (CHUNK 2) */
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 18 }}>
+          {/* HEADER ROW */}
+          <View style={mobileStyles.reportHeader}>
+            <Pressable
+              style={({ pressed }) => [mobileStyles.backBtn, pressed && { opacity: 0.7 }]}
+              onPress={() => setMobileScreen("inbox")}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text style={mobileStyles.backBtnText}>← Back to Inbox</Text>
+            </Pressable>
+            <View
+              style={[
+                mobileStyles.riskBadgePill,
+                {
+                  backgroundColor: activePreMeta!.bgColor,
+                  borderColor: activePreMeta!.borderColor,
+                  borderWidth: 1,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  mobileStyles.riskBadgePillText,
+                  {
+                    color: activePreMeta!.color,
+                  },
+                ]}
+              >
+                {activePreMeta!.label}
+              </Text>
+            </View>
+          </View>
+
+          {/* NOTICE BANNER */}
+          <View style={mobileStyles.safeNoticeBanner}>
+            <Text style={mobileStyles.safeNoticeIcon}>🛡</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={mobileStyles.safeNoticeTitle}>Pre-Open Security Check</Text>
+              <Text style={mobileStyles.safeNoticeSub}>
+                MAILTRACE checked this message before you opened it. Evaluated entirely in memory.
+              </Text>
+            </View>
+          </View>
+
+          {/* VERDICT & RISK SCORE HERO */}
+          <View
+            style={[
+              mobileStyles.verdictCard,
+              {
+                borderColor: activePreMeta!.borderColor,
+              },
+            ]}
+          >
+            <View style={mobileStyles.verdictTopRow}>
+              <View>
+                <Text style={mobileStyles.verdictScoreLabel}>RISK ASSESSMENT</Text>
+                <Text
+                  style={[
+                    mobileStyles.verdictScoreNumber,
+                    {
+                      color: activePreMeta!.color,
+                    },
+                  ]}
+                >
+                  {activePreScanResult.risk_score}
+                  <Text style={mobileStyles.verdictScoreDenom}> / 100</Text>
+                </Text>
+              </View>
+              <View
+                style={[
+                  mobileStyles.verdictBadge,
+                  {
+                    backgroundColor: activePreMeta!.bgColor,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    mobileStyles.verdictBadgeText,
+                    {
+                      color: activePreMeta!.color,
+                    },
+                  ]}
+                >
+                  {activePreMeta!.level}
+                </Text>
+              </View>
+            </View>
+
+            <View style={mobileStyles.dividerLine} />
+
+            <View style={mobileStyles.verdictMetaRow}>
+              <View>
+                <Text style={mobileStyles.metaKey}>VERDICT</Text>
+                <Text
+                  style={[
+                    mobileStyles.metaValBold,
+                    {
+                      color:
+                        activePreScanResult.verdict === "MALICIOUS"
+                          ? "#DC2626"
+                          : activePreScanResult.verdict === "SUSPICIOUS"
+                          ? "#D97706"
+                          : "#059669",
+                    },
+                  ]}
+                >
+                  {activePreScanResult.verdict}
+                </Text>
+              </View>
+              <View>
+                <Text style={mobileStyles.metaKey}>AI CONFIDENCE</Text>
+                <Text style={mobileStyles.metaValBold}>
+                  {activePreScanResult.confidence != null
+                    ? `${(activePreScanResult.confidence * 100).toFixed(1)}%`
+                    : "N/A"}
+                </Text>
+              </View>
+              <View>
+                <Text style={mobileStyles.metaKey}>MODEL</Text>
+                <Text style={mobileStyles.metaValCode}>dataset3_v1.0.0</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* MESSAGE IDENTITY */}
+          <View style={mobileStyles.sectionCard}>
+            <Text style={mobileStyles.sectionHeading}>MESSAGE IDENTITY</Text>
+            <Text style={mobileStyles.cardSubject}>
+              {activePreScanResult.subject || "(No Subject)"}
+            </Text>
+            <View style={mobileStyles.cardMetaRow}>
+              <Text style={mobileStyles.cardMetaKey}>From:</Text>
+              <Text style={mobileStyles.cardMetaVal} numberOfLines={2}>
+                {activePreScanResult.sender_name ? `${activePreScanResult.sender_name} ` : ""}
+                &lt;{activePreScanResult.sender}&gt;
+              </Text>
+            </View>
+            {activePreScanResult.received_at ? (
+              <View style={mobileStyles.cardMetaRow}>
+                <Text style={mobileStyles.cardMetaKey}>Received:</Text>
+                <Text style={mobileStyles.cardMetaVal}>
+                  {new Date(activePreScanResult.received_at).toUTCString()}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          {/* WHY THIS EMAIL WAS FLAGGED */}
+          <View style={mobileStyles.sectionCard}>
+            <Text style={mobileStyles.sectionHeading}>WHY THIS EMAIL WAS FLAGGED</Text>
+            {activePreScanResult.reasons && activePreScanResult.reasons.length > 0 ? (
+              activePreScanResult.reasons.map((r, i) => (
+                <View key={i} style={mobileStyles.reasonRow}>
+                  <Text
+                    style={[
+                      mobileStyles.reasonNumber,
+                      {
+                        color: activePreMeta!.color,
+                      },
+                    ]}
+                  >
+                    {i + 1}.
+                  </Text>
+                  <Text style={mobileStyles.reasonText}>{formatReason(r)}</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={mobileStyles.reasonText}>
+                Clean threat profile: no malicious patterns or lures detected.
+              </Text>
+            )}
+
+            {/* INDICATOR TAGS */}
+            {activePreScanResult.indicators && activePreScanResult.indicators.length > 0 && (
+              <View style={mobileStyles.indicatorChipsWrap}>
+                {activePreScanResult.indicators.map((ind, idx) => (
+                  <View key={idx} style={mobileStyles.indicatorChip}>
+                    <Text style={mobileStyles.indicatorChipText}>{ind.toLowerCase()}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {/* CRYPTOGRAPHIC AUTHENTICATION */}
+          <View style={mobileStyles.sectionCard}>
+            <Text style={mobileStyles.sectionHeading}>CRYPTOGRAPHIC AUTHENTICATION</Text>
+            <View style={mobileStyles.authRow}>
+              <View style={mobileStyles.authItem}>
+                <Text style={mobileStyles.authItemName}>SPF</Text>
+                <Text
+                  style={[
+                    mobileStyles.authItemStatus,
+                    {
+                      color:
+                        activePreScanResult.authentication_summary?.spf === "PASS"
+                          ? "#059669"
+                          : activePreScanResult.authentication_summary?.spf === "FAIL"
+                          ? "#DC2626"
+                          : "#64748B",
+                    },
+                  ]}
+                >
+                  {activePreScanResult.authentication_summary?.spf || "NONE"}
+                </Text>
+              </View>
+              <View style={mobileStyles.authItem}>
+                <Text style={mobileStyles.authItemName}>DKIM</Text>
+                <Text
+                  style={[
+                    mobileStyles.authItemStatus,
+                    {
+                      color:
+                        activePreScanResult.authentication_summary?.dkim === "PASS"
+                          ? "#059669"
+                          : activePreScanResult.authentication_summary?.dkim === "FAIL"
+                          ? "#DC2626"
+                          : "#64748B",
+                    },
+                  ]}
+                >
+                  {activePreScanResult.authentication_summary?.dkim || "NONE"}
+                </Text>
+              </View>
+              <View style={mobileStyles.authItem}>
+                <Text style={mobileStyles.authItemName}>DMARC</Text>
+                <Text
+                  style={[
+                    mobileStyles.authItemStatus,
+                    {
+                      color:
+                        activePreScanResult.authentication_summary?.dmarc === "PASS"
+                          ? "#059669"
+                          : activePreScanResult.authentication_summary?.dmarc === "FAIL"
+                          ? "#DC2626"
+                          : "#64748B",
+                    },
+                  ]}
+                >
+                  {activePreScanResult.authentication_summary?.dmarc || "NONE"}
+                </Text>
+              </View>
+            </View>
+            <View style={mobileStyles.authStatusFooter}>
+              <Text style={mobileStyles.authStatusText}>
+                Status:{" "}
+                {activePreScanResult.authentication_summary?.authenticated
+                  ? "Verified Authenticated"
+                  : "Unverified / Alignment Incomplete"}
+              </Text>
+            </View>
+          </View>
+
+          {/* RECOMMENDED ACTION */}
+          <View
+            style={[
+              mobileStyles.sectionCard,
+              {
+                backgroundColor:
+                  activePreScanResult.verdict === "MALICIOUS" ? "#FFF7ED" : "#F0FDF4",
+                borderColor:
+                  activePreScanResult.verdict === "MALICIOUS" ? "#FED7AA" : "#BBF7D0",
+              },
+            ]}
+          >
+            <Text
+              style={[
+                mobileStyles.sectionHeading,
+                {
+                  color:
+                    activePreScanResult.verdict === "MALICIOUS" ? "#C2410C" : "#15803D",
+                },
+              ]}
+            >
+              RECOMMENDED ACTION
+            </Text>
+            <Text
+              style={[
+                mobileStyles.recommendationText,
+                {
+                  color:
+                    activePreScanResult.verdict === "MALICIOUS" ? "#9A3412" : "#166534",
+                },
+              ]}
+            >
+              {activePreScanResult.recommended_action}
+            </Text>
+          </View>
+
+          {/* PRIMARY CTA: INVESTIGATE DEEP FORENSICS */}
+          <Pressable
+            style={({ pressed }) => [
+              mobileStyles.investigateBtn,
+              analyzingId === activePreScanMessage?.id && { backgroundColor: "#64748B" },
+              pressed && { opacity: 0.8 },
+            ]}
+            onPress={handleInvestigateFromPreScan}
+            disabled={analyzingId === activePreScanMessage?.id}
+          >
+            {analyzingId === activePreScanMessage?.id ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+                <Text style={mobileStyles.investigateBtnText}>Running Deep Forensics...</Text>
+              </View>
+            ) : (
+              <Text style={mobileStyles.investigateBtnText}>Investigate Deep Forensics →</Text>
+            )}
+          </Pressable>
+
+          {/* REAL GMAIL REMEDIATION ACTIONS (CHUNK 3) */}
+          <View style={mobileStyles.deferredActionsContainer}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={mobileStyles.deferredActionsHeader}>
+                GMAIL REMEDIATION ACTIONS
+              </Text>
+              {actionInProgress && (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <ActivityIndicator size="small" color="#2563EB" />
+                  <Text style={{ fontSize: 11, color: "#2563EB", fontWeight: "600" }}>
+                    {actionInProgress === "delete" ? "Moving to Trash..." : actionInProgress === "block-sender" ? "Creating Filter..." : "Reporting Spam..."}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {actionSuccessMessage && (
+              <View
+                style={{
+                  backgroundColor: "#ECFDF5",
+                  borderColor: "#A7F3D0",
+                  borderWidth: 1,
+                  borderRadius: 8,
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  marginTop: 8,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 13 }}>✓</Text>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: "#065F46" }}>
+                  {actionSuccessMessage}
+                </Text>
+              </View>
+            )}
+
+            <View style={mobileStyles.deferredActionsRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  mobileStyles.deferredActionBtn,
+                  actionInProgress !== null && { opacity: 0.6 },
+                  pressed && { opacity: 0.7 },
+                ]}
+                disabled={actionInProgress !== null}
+                onPress={() =>
+                  activePreScanMessage &&
+                  promptRemediationAction(
+                    "report-spam",
+                    selectedMailbox?.id,
+                    activePreScanMessage.id,
+                    activePreScanResult?.sender || activePreScanMessage.from || ""
+                  )
+                }
+              >
+                <Text style={mobileStyles.deferredActionText}>Report Spam</Text>
+              </Pressable>
+
+              {(() => {
+                const curSender = extractCleanSender(activePreScanResult?.sender || activePreScanMessage?.from || "").toLowerCase();
+                const isBlocked = !!(curSender && blockedSenders[curSender]);
+                return (
+                  <Pressable
+                    style={({ pressed }) => [
+                      mobileStyles.deferredActionBtn,
+                      isBlocked && { backgroundColor: "#F0FDF4", borderColor: "#86EFAC" },
+                      actionInProgress !== null && { opacity: 0.6 },
+                      pressed && { opacity: 0.7 },
+                    ]}
+                    disabled={actionInProgress !== null || isBlocked}
+                    onPress={() =>
+                      activePreScanMessage &&
+                      promptRemediationAction(
+                        "block-sender",
+                        selectedMailbox?.id,
+                        activePreScanMessage.id,
+                        activePreScanResult?.sender || activePreScanMessage.from || ""
+                      )
+                    }
+                  >
+                    <Text
+                      style={[
+                        mobileStyles.deferredActionText,
+                        isBlocked && { color: "#15803D" },
+                      ]}
+                    >
+                      {isBlocked ? "✓ Blocked" : "Block Sender"}
+                    </Text>
+                  </Pressable>
+                );
+              })()}
+
+              <Pressable
+                style={({ pressed }) => [
+                  mobileStyles.deferredActionBtn,
+                  mobileStyles.deleteBtnStyle,
+                  actionInProgress !== null && { opacity: 0.6 },
+                  pressed && { opacity: 0.7 },
+                ]}
+                disabled={actionInProgress !== null}
+                onPress={() =>
+                  activePreScanMessage &&
+                  promptRemediationAction(
+                    "delete",
+                    selectedMailbox?.id,
+                    activePreScanMessage.id,
+                    activePreScanResult?.sender || activePreScanMessage.from || ""
+                  )
+                }
+              >
+                <Text style={[mobileStyles.deferredActionText, { color: "#DC2626" }]}>Delete</Text>
+              </Pressable>
+            </View>
+            <Text style={mobileStyles.deferredNoticeText}>
+              Affects your connected Gmail account. Delete moves to Gmail Trash. Block Sender creates an automated filter. Report Spam reports message.
+            </Text>
+          </View>
+        </ScrollView>
       ) : (
-        /* CONNECTED INBOX FEED */
+        /* CONNECTED SECURITY INBOX FEED */
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ padding: 20 }}
@@ -1740,6 +3800,7 @@ export default function App() {
             />
           }
         >
+          {/* MAILBOX STRIP */}
           <View style={mobileStyles.accountStrip}>
             <View style={{ flex: 1 }}>
               <Text style={mobileStyles.accountLabel}>CONNECTED MAILBOX</Text>
@@ -1752,10 +3813,73 @@ export default function App() {
             </Pressable>
           </View>
 
+          {/* MOBILE AUTOMATIC THREAT ALERT BANNER (Chunk 4) */}
+          {activeThreatBanner && (
+            <View style={mobileStyles.mobileAlertBanner}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <Text style={mobileStyles.mobileAlertTitle}>
+                  🚨 {activeThreatBanner.risk_level} THREAT INTERCEPTED
+                </Text>
+                <Pressable onPress={() => handleDismissAlert(activeThreatBanner)}>
+                  <Text style={{ color: "#FCA5A5", fontSize: 11, fontWeight: "600" }}>✕ Dismiss</Text>
+                </Pressable>
+              </View>
+              <Text style={mobileStyles.mobileAlertSub} numberOfLines={2}>
+                {activeThreatBanner.summary}
+              </Text>
+              <Text style={{ fontSize: 11, color: "#FCA5A5", marginBottom: 8 }} numberOfLines={1}>
+                {activeThreatBanner.sender} · Risk: {activeThreatBanner.risk_score}
+              </Text>
+              <View style={mobileStyles.mobileAlertBtnRow}>
+                <Pressable
+                  style={mobileStyles.mobileAlertReviewBtn}
+                  onPress={() => handleReviewAlert(activeThreatBanner)}
+                >
+                  <Text style={mobileStyles.mobileAlertReviewBtnText}>🛡 Review Security Preview</Text>
+                </Pressable>
+                <Pressable
+                  style={mobileStyles.mobileAlertDismissBtn}
+                  onPress={() => handleDismissAlert(activeThreatBanner)}
+                >
+                  <Text style={mobileStyles.mobileAlertDismissBtnText}>Dismiss</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
+          {/* MOBILE MONITORING BAR (Chunk 4) */}
+          {selectedMailbox && (
+            <View style={mobileStyles.mobileMonitoringBar}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <View style={[mobileStyles.statusDot, { backgroundColor: "#10B981" }]} />
+                <Text style={mobileStyles.mobileMonitoringText}>
+                  Near-Real-Time Active
+                </Text>
+              </View>
+              <View style={{ flexDirection: "row", gap: 6 }}>
+                <Pressable
+                  style={[mobileStyles.refreshBtn, { paddingVertical: 4, paddingHorizontal: 8 }]}
+                  onPress={handleSyncMailbox}
+                  disabled={monitoringPolling}
+                >
+                  <Text style={mobileStyles.refreshBtnText}>
+                    {monitoringPolling ? "..." : "↻ Sync"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
+          {/* INBOX HEADER */}
           <View style={mobileStyles.inboxHeaderRow}>
-            <Text style={mobileStyles.inboxTitle}>
-              INBOX {messages.length > 0 ? `(${messages.length})` : ""}
-            </Text>
+            <View>
+              <Text style={mobileStyles.inboxTitle}>
+                SECURITY INBOX {messages.length > 0 ? `(${messages.length})` : ""}
+              </Text>
+              <Text style={mobileStyles.inboxSub}>
+                Evaluated in-memory before opening
+              </Text>
+            </View>
             <Pressable
               style={mobileStyles.refreshBtn}
               onPress={() => loadMessages(selectedMailbox.id)}
@@ -1767,34 +3891,123 @@ export default function App() {
             </Pressable>
           </View>
 
-          {messages.map((item) => (
-            <View key={item.id} style={mobileStyles.emailCard}>
-              <View style={mobileStyles.emailTopRow}>
-                <Text style={mobileStyles.emailSender} numberOfLines={1}>{item.from || "Unknown"}</Text>
-                <Text style={mobileStyles.emailDate}>{item.date?.split(" ").slice(1, 4).join(" ") || ""}</Text>
-              </View>
-              <Text style={mobileStyles.emailSubject} numberOfLines={2}>{item.subject || "(No Subject)"}</Text>
-              {item.snippet ? <Text style={mobileStyles.emailSnippet} numberOfLines={2}>{item.snippet}</Text> : null}
-              <View style={{ alignItems: "flex-end", marginTop: 8 }}>
-                <Pressable
-                  style={({ pressed }) => [
-                    mobileStyles.analyzeBtn,
-                    analyzingId === item.id && { backgroundColor: "#6B7280" },
-                    pressed && { opacity: 0.7 },
-                  ]}
-                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  onPress={() => handleAnalyzeLiveMessage(item)}
-                  disabled={analyzingId === item.id}
-                >
-                  <Text style={mobileStyles.analyzeBtnText}>
-                    {analyzingId === item.id ? "Analyzing..." : "Analyze →"}
+          {/* INBOX MESSAGE CARDS */}
+          {messages.map((item) => {
+            const scan = preScanCache[item.id];
+            const senderParsed = parseSender(item.from);
+            const scanMeta = scan ? getRiskMeta(scan.risk_score, scan.risk_level, scan.verdict) : null;
+            const isScanning = preScanningIds[item.id];
+
+            return (
+              <Pressable
+                key={item.id}
+                style={({ pressed }) => [
+                  mobileStyles.emailCard,
+                  scanMeta && { borderLeftWidth: 4, borderLeftColor: scanMeta.color },
+                  pressed && { opacity: 0.95 },
+                ]}
+                onPress={() => handleSelectPreScan(item)}
+              >
+                <View style={mobileStyles.emailTopRow}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={mobileStyles.emailSenderName} numberOfLines={1}>
+                      {senderParsed.name}
+                    </Text>
+                    {senderParsed.email ? (
+                      <Text style={mobileStyles.emailSenderAddress} numberOfLines={1}>
+                        {senderParsed.email}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <Text style={mobileStyles.emailDate}>
+                    {item.date?.split(" ").slice(1, 4).join(" ") || ""}
                   </Text>
-                </Pressable>
-              </View>
-            </View>
-          ))}
+                </View>
+
+                <Text style={mobileStyles.emailSubject} numberOfLines={2}>
+                  {item.subject || "(No Subject)"}
+                </Text>
+
+                {/* SECURITY THREAT BADGE ROW */}
+                <View style={mobileStyles.cardSecurityRow}>
+                  {scan ? (
+                    <View style={{ flex: 1 }}>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          marginBottom: 4,
+                        }}
+                      >
+                        <View
+                          style={[
+                            mobileStyles.cardBadgePill,
+                            { backgroundColor: scanMeta!.bgColor },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              mobileStyles.cardBadgePillText,
+                              { color: scanMeta!.color },
+                            ]}
+                          >
+                            {scanMeta!.label} · {scan.risk_score}/100
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={mobileStyles.cardReasonSnippet} numberOfLines={1}>
+                        {getPrimaryReason(scan)}
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={{ flex: 1 }}>
+                      <View
+                        style={[
+                          mobileStyles.cardBadgePill,
+                          { backgroundColor: "#F1F5F9" },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            mobileStyles.cardBadgePillText,
+                            { color: "#64748B" },
+                          ]}
+                        >
+                          {isScanning ? "⏳ SCANNING..." : "🔍 TAP TO CHECK"}
+                        </Text>
+                      </View>
+                      <Text style={mobileStyles.cardReasonSnippet} numberOfLines={1}>
+                        Assess threats before opening
+                      </Text>
+                    </View>
+                  )}
+
+                  <View style={mobileStyles.cardActionCol}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        mobileStyles.previewActionBtn,
+                        isScanning && { backgroundColor: "#64748B" },
+                        pressed && { opacity: 0.7 },
+                      ]}
+                      onPress={() => handleSelectPreScan(item)}
+                      disabled={isScanning}
+                    >
+                      {isScanning ? (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      ) : (
+                        <Text style={mobileStyles.previewActionBtnText}>Preview →</Text>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              </Pressable>
+            );
+          })}
         </ScrollView>
       )}
+
+      {renderRemediationConfirmModal()}
     </View>
   );
 }
@@ -1803,11 +4016,113 @@ export default function App() {
 // STYLES: DESKTOP SOC WORKSTATION (Exact Match to Screenshots 1 - 5)
 // =============================================================================
 const socStyles = StyleSheet.create({
+  threatAlertBanner: {
+    backgroundColor: "#7F1D1D",
+    borderColor: "#EF4444",
+    borderWidth: 1,
+    borderRadius: 8,
+    marginHorizontal: 20,
+    marginTop: 12,
+    marginBottom: 4,
+    padding: 14,
+    shadowColor: "#EF4444",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  alertPulseDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  threatAlertBannerTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: 0.3,
+  },
+  threatAlertBannerSub: {
+    fontSize: 13,
+    color: "#FECACA",
+    marginBottom: 4,
+    lineHeight: 18,
+  },
+  threatAlertBannerMeta: {
+    fontSize: 12,
+    color: "#FCA5A5",
+  },
+  threatAlertReviewBtn: {
+    backgroundColor: "#DC2626",
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#F87171",
+  },
+  threatAlertReviewBtnText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  threatAlertDismissOutlineBtn: {
+    backgroundColor: "transparent",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#EF4444",
+  },
+  threatAlertDismissOutlineText: {
+    color: "#FECACA",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  threatAlertDismissBtn: {
+    padding: 4,
+  },
+  threatAlertDismissText: {
+    color: "#FCA5A5",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  monitoringBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  monitoringStatusText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#334155",
+  },
+  monitoringBtnSmall: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 6,
+  },
+  monitoringBtnSmallText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#334155",
+  },
   page: {
     flex: 1,
     backgroundColor: "#F8FAFC",
   },
   navBar: {
+
     height: 56,
     backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
@@ -2831,17 +5146,336 @@ const socStyles = StyleSheet.create({
     fontWeight: "500",
     letterSpacing: 1,
   },
+  scenarioBottomRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 6,
+  },
+  preScanDemoBadge: {
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 4,
+  },
+  preScanDemoBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#2563EB",
+  },
+  modalOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(15, 23, 42, 0.65)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 9999,
+  },
+  modalContainer: {
+    width: 680,
+    maxWidth: "90%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    elevation: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#F8FAFC",
+  },
+  modalTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: 1,
+  },
+  modalCloseBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#E2E8F0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalCloseText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#475569",
+  },
+  modalNoticeBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 14,
+  },
+  modalNoticeIcon: {
+    fontSize: 22,
+  },
+  modalNoticeTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#1E3A8A",
+  },
+  modalNoticeSub: {
+    fontSize: 12,
+    color: "#3B82F6",
+    marginTop: 2,
+  },
+  modalScoreRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 14,
+  },
+  modalScoreBox: {
+    flex: 1,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    alignItems: "center",
+  },
+  modalScoreLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#64748B",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  modalScoreNum: {
+    fontSize: 26,
+    fontWeight: "900",
+  },
+  modalVerdictText: {
+    fontSize: 18,
+    fontWeight: "900",
+    marginTop: 4,
+  },
+  modalScoreValue: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#0F172A",
+    marginTop: 2,
+  },
+  modalScoreSub: {
+    fontSize: 10,
+    color: "#64748B",
+    marginTop: 2,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  modalSection: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  modalSectionTitle: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#475569",
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  metaGridRow: {
+    flexDirection: "row",
+    marginBottom: 4,
+  },
+  metaGridKey: {
+    width: 80,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  metaGridVal: {
+    flex: 1,
+    fontSize: 12,
+    color: "#1E293B",
+  },
+  metaGridValBold: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  modalReasonRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginBottom: 6,
+  },
+  modalReasonNum: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  modalReasonText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#334155",
+    lineHeight: 18,
+  },
+  modalAuthRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingVertical: 4,
+  },
+  modalAuthCol: {
+    alignItems: "center",
+  },
+  modalAuthLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748B",
+    marginBottom: 2,
+  },
+  modalAuthVal: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  modalBtnRow: {
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  modalPrimaryBtn: {
+    backgroundColor: "#0F172A",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  modalPrimaryBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  modalRemediationRow: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  remediationNoticeTitle: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#64748B",
+    letterSpacing: 0.5,
+  },
+  modalSecondaryBtn: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  modalSecondaryBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#475569",
+  },
 });
 
 // =============================================================================
 // STYLES: MOBILE VIEW
 // =============================================================================
 const mobileStyles = StyleSheet.create({
+  mobileAlertBanner: {
+    backgroundColor: "#7F1D1D",
+    borderColor: "#EF4444",
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  mobileAlertTitle: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  mobileAlertSub: {
+    color: "#FECACA",
+    fontSize: 12,
+    lineHeight: 16,
+    marginBottom: 8,
+  },
+  mobileAlertBtnRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  mobileAlertReviewBtn: {
+    flex: 1,
+    backgroundColor: "#DC2626",
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignItems: "center",
+  },
+  mobileAlertReviewBtnText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  mobileAlertDismissBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: "transparent",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#EF4444",
+    alignItems: "center",
+  },
+  mobileAlertDismissBtnText: {
+    color: "#FECACA",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  mobileMonitoringBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    padding: 10,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  mobileMonitoringText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#475569",
+  },
   page: {
     flex: 1,
     backgroundColor: "#F8F7F4",
     paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 28) : 48,
   },
+
   topBar: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -3233,6 +5867,254 @@ const mobileStyles = StyleSheet.create({
   exportDossierBtnText: {
     color: "#FFFFFF",
     fontSize: 14,
+    fontWeight: "700",
+  },
+  demoOfflineBox: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#E5E5E5",
+    marginBottom: 20,
+  },
+  demoOfflineTitle: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#64748B",
+    letterSpacing: 1,
+  },
+  demoOfflinePill: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  demoOfflinePillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  safeNoticeBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+  },
+  safeNoticeIcon: {
+    fontSize: 20,
+  },
+  safeNoticeTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#1E3A8A",
+  },
+  safeNoticeSub: {
+    fontSize: 12,
+    color: "#3B82F6",
+    marginTop: 2,
+  },
+  riskBadgePill: {
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  riskBadgePillText: {
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  reasonRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginBottom: 8,
+  },
+  reasonNumber: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  reasonText: {
+    flex: 1,
+    fontSize: 13,
+    color: "#334155",
+    lineHeight: 18,
+  },
+  indicatorChipsWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  indicatorChip: {
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  indicatorChipText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#475569",
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  authStatusFooter: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderColor: "#F1F5F9",
+    alignItems: "center",
+  },
+  authStatusText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  recommendationText: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "600",
+  },
+  investigateBtn: {
+    backgroundColor: "#0F172A",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  investigateBtnText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  deferredActionsContainer: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  deferredActionsHeader: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#64748B",
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  deferredActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  deferredActionBtn: {
+    flex: 1,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    paddingVertical: 9,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  deferredActionText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  deleteBtnStyle: {
+    borderColor: "#FCA5A5",
+  },
+  deferredNoticeText: {
+    fontSize: 11,
+    color: "#94A3B8",
+    marginTop: 8,
+    textAlign: "center",
+  },
+  quickDemoLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#64748B",
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  demoPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  demoDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  demoPillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  inboxSub: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  emailSenderName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  emailSenderAddress: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 1,
+  },
+  cardSecurityRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderColor: "#F1F5F9",
+  },
+  cardBadgePill: {
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  cardBadgePillText: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+  cardReasonSnippet: {
+    fontSize: 11,
+    color: "#475569",
+    marginTop: 2,
+  },
+  cardActionCol: {
+    marginLeft: 8,
+  },
+  previewActionBtn: {
+    backgroundColor: "#0F172A",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  previewActionBtnText: {
+    color: "#FFFFFF",
+    fontSize: 12,
     fontWeight: "700",
   },
 });

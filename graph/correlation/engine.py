@@ -219,6 +219,28 @@ class CorrelationEngine:
                     if rdap_info.get("query_type") == "domain":
                         _add_rel(f"domain:{q_key.lower()}", net_id, "DOMAIN_REGISTERED_TO_NETWORK", {"rdap_query": q_key})
 
+        # 10. NLP Extracted Entities (Structured Indicators)
+        parsed_body = getattr(parsed, "body_text", None) or getattr(parsed, "body", "") or ""
+        if parsed_body or parsed.subject:
+            try:
+                from backend.app.services.intelligence.nlp_entities import extract_entities
+                s_name = parsed.from_address.display_name if parsed.from_address else None
+                s_email = parsed.from_address.email if parsed.from_address else None
+                extracted = extract_entities(
+                    subject=parsed.subject or "",
+                    body=parsed_body,
+                    sender_name=s_name,
+                    sender_email=s_email,
+                )
+                for ent in extracted:
+                    if ent.type in ("AMOUNT", "PAYMENT_INSTRUCTION", "ACCOUNT_IDENTIFIER", "CRYPTO_WALLET", "ORGANIZATION", "ROLE", "SERVICE_PLATFORM"):
+                        norm = ent.normalized_value or ent.value
+                        ent_id = f"{ent.type.lower()}:{norm}"
+                        _add_entity(ent_id, ent.type.lower(), ent.value, {"context": ent.context, "type": ent.type})
+                        _add_rel(email_entity_id, ent_id, f"EMAIL_REFERENCES_{ent.type}", {"source": "nlp_extraction"})
+            except Exception as exc:
+                logger.debug("NLP entity graph extraction skipped: %s", exc)
+
         return EmailGraph(
             entities=list(entities.values()),
             relationships=relationships,
@@ -373,6 +395,23 @@ class CorrelationEngine:
                 s1,
                 {"subject_1": p1.subject, "subject_2": p2.subject, "normalized_pattern": s1},
             )
+
+        # Rule 11: Shared Financial Routing or Crypto Wallet
+        b1 = getattr(p1, "body_text", None) or getattr(p1, "body", "") or ""
+        b2 = getattr(p2, "body_text", None) or getattr(p2, "body", "") or ""
+        if (b1 or p1.subject) and (b2 or p2.subject):
+            try:
+                from backend.app.services.intelligence.nlp_entities import extract_entities
+                e1 = extract_entities(p1.subject or "", b1)
+                e2 = extract_entities(p2.subject or "", b2)
+                targets = {"ACCOUNT_IDENTIFIER", "CRYPTO_WALLET"}
+                vals1 = {ent.normalized_value or ent.value for ent in e1 if ent.type in targets}
+                vals2 = {ent.normalized_value or ent.value for ent in e2 if ent.type in targets}
+                common_entities = vals1 & vals2
+                for cent in common_entities:
+                    _add_match("shared_financial_entity", cent, {"entity": cent})
+            except Exception:
+                pass
 
         return matches
 
