@@ -19,7 +19,7 @@ from backend.app.schemas.analysis import NormalizedEmail
 from backend.app.schemas.pre_open import AuthenticationSummary, PreOpenScanResponse
 from backend.app.services.intelligence.nlp_entities import extract_entities
 from backend.app.services.intelligence.nlp_intent import extract_threat_intents
-from backend.app.services.risk.levels import RiskLevel
+from backend.app.services.risk.levels import RiskLevel, get_risk_level
 from backend.app.services.risk.risk_engine import RiskEngine
 
 # Regex heuristics for fast linguistic threat detection
@@ -422,29 +422,21 @@ def scan_email_pre_open(email: NormalizedEmail) -> PreOpenScanResponse:
             "Do not open, click any links, or download attachments. "
             "Flag or report this message as a security threat."
         )
-        ml_conf = (ml_result.confidence or 0.8) if (ml_result and ml_result.label == "MALICIOUS") else 0.8
-        base_malicious_score = int(65 + ml_conf * 15)  # 77 to 80 base
-        total_score = max(raw_total_score + nlp_risk_boost, base_malicious_score)
-        if (has_financial_lure or has_credential_lure) and (has_urgency_lure or has_exec_lure):
-            total_score = max(total_score, 85)
-        risk_level = RiskLevel.CRITICAL if total_score >= 85 else RiskLevel.HIGH
     elif has_suspicious:
         verdict = Classification.SUSPICIOUS
         recommended_action = (
             "Exercise caution before opening. Verify the sender's identity "
             "through an external channel before clicking links or replying."
         )
-        total_score = max(raw_total_score + nlp_risk_boost, 45)
-        risk_level = RiskLevel.HIGH if total_score >= 70 else RiskLevel.MEDIUM
     else:
         verdict = Classification.BENIGN
         recommended_action = (
             "Standard security checks passed. Verified sender identity and clean content. Safe to preview."
         )
-        total_score = min(raw_total_score, 20)
-        risk_level = RiskLevel.LOW
 
-    total_score = max(0, min(100, total_score))
+    # Invariant: total_score MUST strictly equal the exact sum of all 6 breakdown categories
+    total_score = max(0, min(100, raw_total_score))
+    risk_level = RiskLevel(get_risk_level(total_score))
 
     # 9. Aggregate explainable reasons and indicators with SPECIFIC threats first
     specific_threat_reasons: List[str] = []

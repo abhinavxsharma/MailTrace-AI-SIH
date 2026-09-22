@@ -668,8 +668,9 @@ export default function App() {
   };
 
   const handleReviewAlert = (alertItem: SecurityAlertItem) => {
-    // Construct PreOpenScanResult from the normalized alert metadata (zero raw body accessed)
-    const scanResult: PreOpenScanResult = {
+    // Reuse cached PreOpenScanResult if available, or reconstruct from normalized alert metadata
+    const cached = preScanCache[alertItem.message_id];
+    const scanResult: PreOpenScanResult = cached || {
       message_id: alertItem.message_id,
       thread_id: alertItem.thread_id,
       sender: alertItem.sender,
@@ -691,9 +692,9 @@ export default function App() {
       recommended_action: alertItem.recommended_action || "Review email security preview before opening.",
       can_investigate: true,
       breakdown: {
-        ai_threat: alertItem.indicators.includes("ML_MALICIOUS_THREAT_DETECTED") ? 35 : 0,
-        identity: alertItem.indicators.some((i) => i.startsWith("IDENTITY_")) ? 25 : 0,
-        auth: alertItem.indicators.some((i) => i.startsWith("AUTH_")) ? 20 : 0,
+        ai_threat: alertItem.indicators.includes("ML_MALICIOUS_THREAT_DETECTED") ? 25 : 0,
+        identity: alertItem.indicators.some((i) => i.startsWith("IDENTITY_")) ? 20 : 0,
+        auth: alertItem.indicators.some((i) => i.startsWith("AUTH_")) ? 15 : 0,
         url_domain: alertItem.indicators.some((i) => i.startsWith("LURE_") || i.startsWith("URL_")) ? 15 : 0,
       },
     };
@@ -1086,24 +1087,40 @@ export default function App() {
       const stageML = data.analysis?.ml || {};
 
       const cachedPreScan = preScanCache[msg.id];
-      const finalScore = Math.max(
-        data.case?.risk_score ?? 0,
-        cachedPreScan?.risk_score ?? 0
-      );
       const isMalicious =
         data.case?.classification === "MALICIOUS" ||
-        cachedPreScan?.verdict === "MALICIOUS" ||
-        finalScore >= 70;
+        cachedPreScan?.verdict === "MALICIOUS";
       const isSuspicious =
         isMalicious ||
         data.case?.classification === "SUSPICIOUS" ||
-        cachedPreScan?.verdict === "SUSPICIOUS" ||
-        finalScore >= 40;
-      const finalCategory: "HIGH" | "MEDIUM" | "LOW" = isMalicious
-        ? "HIGH"
-        : isSuspicious
-        ? "MEDIUM"
-        : "LOW";
+        cachedPreScan?.verdict === "SUSPICIOUS";
+
+      const computedBars = {
+        ai_threat: stageRisk.breakdown?.ai_threat ?? (isMalicious ? 25 : 0),
+        identity: stageRisk.breakdown?.identity ?? (cachedPreScan?.indicators?.includes("IDENTITY_FREE_WEBMAIL_IMPERSONATION") ? 16 : stageForensics.identity?.sender_reply_to_mismatch ? 20 : 0),
+        auth: stageRisk.breakdown?.authentication ?? (stageAuth.authenticated ? 0 : 12),
+        url_domain: stageRisk.breakdown?.url_domain ?? (cachedPreScan?.indicators?.some((i: string) => i.startsWith("URL_")) ? 10 : 0),
+        infra: stageRisk.breakdown?.infrastructure ?? 0,
+        campaign: stageRisk.breakdown?.campaign ?? (data.analysis?.correlation?.campaign_detected ? 10 : 0),
+      };
+
+      // Invariant: The overall risk score MUST strictly equal the exact sum of all 6 category breakdown bars
+      const computedBarsSum =
+        computedBars.ai_threat +
+        computedBars.identity +
+        computedBars.auth +
+        computedBars.url_domain +
+        computedBars.infra +
+        computedBars.campaign;
+
+      const finalScore = stageRisk.total_score ?? computedBarsSum;
+
+      const finalCategory: "HIGH" | "MEDIUM" | "LOW" =
+        finalScore >= 70 || isMalicious
+          ? "HIGH"
+          : finalScore >= 40 || isSuspicious
+          ? "MEDIUM"
+          : "LOW";
       const finalClassification = isMalicious
         ? "MALICIOUS"
         : isSuspicious
@@ -1124,16 +1141,9 @@ export default function App() {
         message_id: `<${msg.id}@mail.gmail.com>`,
         body_text: stageForensics.body_snippet || msg.snippet || "(Empty body)",
         classification: finalClassification,
-        risk_score: finalScore || 15,
+        risk_score: finalScore,
         ai_confidence: data.case?.ai_confidence ?? cachedPreScan?.confidence ?? 0.85,
-        bars: {
-          ai_threat: stageRisk.breakdown?.ai_threat ?? (isMalicious ? 25 : 0),
-          identity: stageRisk.breakdown?.identity ?? (cachedPreScan?.indicators?.includes("IDENTITY_FREE_WEBMAIL_IMPERSONATION") ? 16 : stageForensics.identity?.sender_reply_to_mismatch ? 20 : 0),
-          auth: stageRisk.breakdown?.authentication ?? (stageAuth.authenticated ? 0 : 12),
-          url_domain: stageRisk.breakdown?.url_domain ?? (cachedPreScan?.indicators?.some(i => i.startsWith("URL_")) ? 10 : 0),
-          infra: stageRisk.breakdown?.infrastructure ?? 0,
-          campaign: stageRisk.breakdown?.campaign ?? (data.analysis?.correlation?.campaign_detected ? 10 : 0),
-        },
+        bars: computedBars,
         auth: {
           spf: stageAuth.spf || "PASS",
           dkim: stageAuth.dkim || "PASS",
@@ -1251,7 +1261,15 @@ export default function App() {
           message_id: `<${file.name}@upload.mailtrace>`,
           body_text: stageForensics.body_snippet || text.slice(0, 800),
           classification: data.case?.classification || "MALICIOUS",
-          risk_score: data.case?.risk_score ?? 73,
+          risk_score:
+            stageRisk.total_score ??
+            data.case?.risk_score ??
+            ((stageRisk.breakdown?.ai_threat ?? 25) +
+              (stageRisk.breakdown?.identity ?? 20) +
+              (stageRisk.breakdown?.authentication ?? 3) +
+              (stageRisk.breakdown?.url_domain ?? 15) +
+              (stageRisk.breakdown?.infrastructure ?? 0) +
+              (stageRisk.breakdown?.campaign ?? 10)),
           ai_confidence: data.case?.ai_confidence ?? 0.998,
           bars: {
             ai_threat: stageRisk.breakdown?.ai_threat ?? 25,

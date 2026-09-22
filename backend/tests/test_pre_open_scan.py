@@ -166,6 +166,7 @@ class PreOpenScanTestCase(unittest.TestCase):
         self.assertEqual(res.authentication_summary.dmarc, "PASS")
         self.assertTrue(res.authentication_summary.authenticated)
         self.assertTrue(res.can_investigate)
+        self.assertEqual(res.risk_score, sum(res.breakdown.values()))
         self.assertIn("Safe to preview", res.recommended_action)
         self.assertTrue(any("Cryptographic authentication" in r or "Clean threat profile" in r for r in res.reasons))
 
@@ -201,6 +202,7 @@ class PreOpenScanTestCase(unittest.TestCase):
         self.assertEqual(res.authentication_summary.spf, "FAIL")
         self.assertEqual(res.authentication_summary.dmarc, "FAIL")
         self.assertFalse(res.authentication_summary.authenticated)
+        self.assertEqual(res.risk_score, sum(res.breakdown.values()))
 
         # Verify explainable reasons
         reasons_text = " ".join(res.reasons)
